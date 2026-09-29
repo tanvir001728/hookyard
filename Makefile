@@ -21,8 +21,13 @@ help: ## Show this help
 	@awk 'BEGIN {FS = ":.*##"; printf "Usage: make \033[36m<target>\033[0m\n\n"} /^[a-zA-Z_-]+:.*?##/ { printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
 
 .PHONY: build
-build: ## Build the hookyard binary into ./bin
+build: ## Build hookyard and flakyvendor into ./bin
 	go build -trimpath -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/hookyard ./cmd/hookyard
+	go build -trimpath -o $(BIN_DIR)/flakyvendor ./cmd/flakyvendor
+
+.PHONY: flakyvendor
+flakyvendor: build ## Run the flaky test vendor on :9090
+	./$(BIN_DIR)/flakyvendor
 
 .PHONY: run
 run: build ## Build and run the server against the dev database (make dev-db)
