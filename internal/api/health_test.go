@@ -29,7 +29,7 @@ func TestHealthz(t *testing.T) {
 
 func TestReadyz(t *testing.T) {
 	ok := func(context.Context) error { return nil }
-	down := func(context.Context) error { return errors.New("connection refused") }
+	down := func(context.Context) error { return errors.New("dial tcp 10.0.0.12:5432: connection refused") }
 
 	tests := []struct {
 		name       string
@@ -58,6 +58,11 @@ func TestReadyz(t *testing.T) {
 			}
 			if len(body.Checks) != len(tt.opts) {
 				t.Errorf("got %d check results, want %d", len(body.Checks), len(tt.opts))
+			}
+			for _, c := range body.Checks {
+				if c.Status == "fail" && c.Error != "unavailable" {
+					t.Errorf("check %s leaks error details: %q", c.Name, c.Error)
+				}
 			}
 		})
 	}

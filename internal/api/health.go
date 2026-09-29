@@ -44,7 +44,10 @@ func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 			defer wg.Done()
 			res := checkResult{Name: name, Status: "ok"}
 			if err := check(ctx); err != nil {
-				res.Status, res.Error = "fail", err.Error()
+				// /readyz is unauthenticated: log the details, but don't expose
+				// internals such as host names in the response.
+				s.log.Warn("readiness check failed", "check", name, "error", err)
+				res.Status, res.Error = "fail", "unavailable"
 			}
 			mu.Lock()
 			results = append(results, res)
