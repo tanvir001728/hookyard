@@ -27,6 +27,9 @@ type V1 struct {
 	Config  *config.File
 	Tokens  []config.APIToken
 	MaxBody int64
+	// Notify, if set, is called after a request is enqueued so delivery can
+	// start without waiting for the next poll.
+	Notify func()
 }
 
 // WithV1 enables the /v1 API.

@@ -73,6 +73,9 @@ func (s *Server) handleCreateRequest(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, toRequestJSON(req))
 		return
 	}
+	if s.v1.Notify != nil {
+		s.v1.Notify()
+	}
 	s.log.Info("request enqueued", "id", req.ID, "upstream", req.Upstream, "status", req.Status, "actor", actorFrom(r.Context()))
 	w.Header().Set("Location", "/v1/requests/"+req.ID)
 	writeJSON(w, http.StatusAccepted, toRequestJSON(req))

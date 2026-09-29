@@ -19,6 +19,8 @@ Hookyard reads two kinds of settings:
 | `HOOKYARD_AUTO_MIGRATE` | `-auto-migrate` | `true` | Apply database migrations on startup |
 | `HOOKYARD_SHUTDOWN_TIMEOUT` | `-shutdown-timeout` | `30s` | Graceful shutdown limit |
 | `HOOKYARD_MAX_BODY_BYTES` | | `1048576` | Maximum API request body size (1 KiB to 64 MiB) |
+| `HOOKYARD_WORKERS` | | `32` | Maximum concurrent deliveries (1 to 1024) |
+| `HOOKYARD_POLL_INTERVAL` | | `1s` | How often the queue is checked when idle. New requests are picked up immediately. |
 
 ### API tokens
 

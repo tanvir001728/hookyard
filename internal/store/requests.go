@@ -282,7 +282,8 @@ func (s *Store) ListAttempts(ctx context.Context, requestID string) ([]model.Att
 	return attempts, nil
 }
 
-func scanRequest(row pgx.Row) (model.Request, error) {
+// scanRequest scans requestColumns, followed by any extra destinations.
+func scanRequest(row pgx.Row, extra ...any) (model.Request, error) {
 	var (
 		r                          model.Request
 		headers, tags, retry, body []byte
@@ -290,9 +291,12 @@ func scanRequest(row pgx.Row) (model.Request, error) {
 		status                     string
 		timeoutMS                  int64
 	)
-	err := row.Scan(&r.ID, &r.Upstream, &r.Method, &r.Path, &headers, &body, &dedupeKey, &status,
+	dest := []any{
+		&r.ID, &r.Upstream, &r.Method, &r.Path, &headers, &body, &dedupeKey, &status,
 		&r.AttemptCount, &retry, &timeoutMS, &tags, &r.DeliverAt, &r.NextAttemptAt, &errCode, &errMsg,
-		&r.LastStatusCode, &r.CreatedAt, &r.UpdatedAt, &r.CompletedAt)
+		&r.LastStatusCode, &r.CreatedAt, &r.UpdatedAt, &r.CompletedAt,
+	}
+	err := row.Scan(append(dest, extra...)...)
 	if err != nil {
 		return model.Request{}, err
 	}
