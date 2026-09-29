@@ -1,10 +1,16 @@
 package worker
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/tanvir001728/hookyard/internal/model"
+	"github.com/tanvir001728/hookyard/internal/retry"
 )
+
+// ErrCodeMaxAgeExceeded marks requests given up because their retry budget
+// (max_age) ran out.
+const ErrCodeMaxAgeExceeded = "max_age_exceeded"
 
 // Decision is what happens to a request after an attempt.
 type Decision struct {
@@ -12,23 +18,59 @@ type Decision struct {
 	// Status is succeeded, failed (retry at RetryAt) or dead.
 	Status  model.Status
 	RetryAt *time.Time
+	// LastError, if set, replaces the attempt's error as the request's
+	// last_error, for example to explain that max_age was exceeded.
+	LastError *model.DeliveryError
 }
 
 // Decider classifies an attempt and schedules the next one.
 type Decider func(req model.Request, attempt int, res AttemptResult, now time.Time) Decision
 
-// decideFixedInterval treats 2xx as success and retries everything else after
-// the policy's initial interval until max_attempts is reached.
-//
-// TODO(#7): replace with exponential backoff and jitter, Retry-After,
-// permanent client errors and max_age.
-func decideFixedInterval(req model.Request, attempt int, res AttemptResult, now time.Time) Decision {
-	if res.Error == nil {
-		return Decision{Outcome: model.OutcomeSuccess, Status: model.StatusSucceeded}
+// PolicyDecider applies each request's retry policy: exponential backoff with
+// full jitter, Retry-After on 429 and 503, permanent client errors, and
+// max_age. rnd returns values in [0, 1); nil means math/rand.
+func PolicyDecider(rnd func() float64) Decider {
+	return func(req model.Request, attempt int, res AttemptResult, now time.Time) Decision {
+		outcome := model.OutcomeSuccess
+		switch {
+		case res.StatusCode != 0:
+			outcome = retry.Classify(res.StatusCode)
+		case res.Error != nil:
+			// Timeouts, connection errors and internal problems may be transient.
+			outcome = model.OutcomeRetryableFailure
+		}
+
+		switch {
+		case outcome == model.OutcomeSuccess:
+			return Decision{Outcome: outcome, Status: model.StatusSucceeded}
+		case outcome == model.OutcomePermanentFailure:
+			return Decision{Outcome: outcome, Status: model.StatusDead}
+		case attempt >= req.Retry.MaxAttempts:
+			return Decision{Outcome: outcome, Status: model.StatusDead}
+		}
+
+		delay := retry.Backoff(req.Retry, attempt, rnd)
+		if retry.HonorsRetryAfter(res.StatusCode) && res.Headers != nil {
+			if d, ok := retry.ParseRetryAfter(res.Headers.Get("Retry-After"), now); ok {
+				delay = d
+			}
+		}
+		next := now.Add(delay)
+
+		if deadline := req.RetryWindowStart.Add(req.Retry.MaxAge); next.After(deadline) {
+			return Decision{Outcome: outcome, Status: model.StatusDead, LastError: &model.DeliveryError{
+				Code: ErrCodeMaxAgeExceeded,
+				Message: fmt.Sprintf("gave up after %d attempt(s): the next attempt would be after max_age (%s) ran out; last error: %s",
+					attempt, model.FormatDuration(req.Retry.MaxAge), errorMessage(res)),
+			}}
+		}
+		return Decision{Outcome: outcome, Status: model.StatusFailed, RetryAt: &next}
 	}
-	if attempt >= req.Retry.MaxAttempts {
-		return Decision{Outcome: model.OutcomeRetryableFailure, Status: model.StatusDead}
+}
+
+func errorMessage(res AttemptResult) string {
+	if res.Error != nil {
+		return res.Error.Message
 	}
-	next := now.Add(req.Retry.InitialInterval)
-	return Decision{Outcome: model.OutcomeRetryableFailure, Status: model.StatusFailed, RetryAt: &next}
+	return fmt.Sprintf("status %d", res.StatusCode)
 }

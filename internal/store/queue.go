@@ -56,6 +56,24 @@ func (s *Store) ClaimDue(ctx context.Context, limit int, leaseMargin time.Durati
 	return claims, nil
 }
 
+// NextDueAt returns when the earliest waiting request becomes due, or nil if
+// nothing is waiting.
+func (s *Store) NextDueAt(ctx context.Context) (*time.Time, error) {
+	var next *time.Time
+	err := s.pool.QueryRow(ctx, `
+		SELECT next_attempt_at FROM requests
+		WHERE status IN ('scheduled', 'pending', 'failed')
+		ORDER BY next_attempt_at
+		LIMIT 1`).Scan(&next)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("next due request: %w", err)
+	}
+	return next, nil
+}
+
 // RecoverExpiredLeases returns in_flight requests whose lease expired, because
 // their worker crashed or stalled, to pending so they are delivered again.
 func (s *Store) RecoverExpiredLeases(ctx context.Context) (int64, error) {
@@ -85,6 +103,9 @@ type AttemptRecord struct {
 	NextAttemptAt *time.Time
 	// LeaseExpiresAt must be the value from the Claim.
 	LeaseExpiresAt time.Time
+	// LastError, if set, is stored as the request's last error instead of the
+	// attempt's error (for example "max_age_exceeded").
+	LastError *model.DeliveryError
 }
 
 // RecordAttempt stores an attempt and updates its request in one transaction.
@@ -104,6 +125,10 @@ func (s *Store) RecordAttempt(ctx context.Context, rec AttemptRecord) error {
 	var errCode, errMsg *string
 	if a.Error != nil {
 		errCode, errMsg = &a.Error.Code, &a.Error.Message
+	}
+	reqErrCode, reqErrMsg := errCode, errMsg
+	if rec.LastError != nil {
+		reqErrCode, reqErrMsg = &rec.LastError.Code, &rec.LastError.Message
 	}
 	var respHeaders []byte
 	var respBody *string
@@ -135,7 +160,7 @@ func (s *Store) RecordAttempt(ctx context.Context, rec AttemptRecord) error {
 			completed_at = CASE WHEN $3 IN ('succeeded', 'dead') THEN now() END
 		WHERE id = $1 AND status = 'in_flight' AND lease_expires_at = $2`,
 		a.RequestID, rec.LeaseExpiresAt, string(rec.Status), a.Number, rec.NextAttemptAt,
-		errCode, errMsg, a.StatusCode)
+		reqErrCode, reqErrMsg, a.StatusCode)
 	if err != nil {
 		return fmt.Errorf("update request: %w", err)
 	}

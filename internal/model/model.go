@@ -106,10 +106,13 @@ type Request struct {
 	Timeout      time.Duration
 	Tags         map[string]string
 
-	DeliverAt      *time.Time
-	NextAttemptAt  *time.Time
-	LastError      *DeliveryError
-	LastStatusCode *int
+	DeliverAt     *time.Time
+	NextAttemptAt *time.Time
+	// RetryWindowStart anchors Retry.MaxAge: when the request first became
+	// due, or when it was last replayed.
+	RetryWindowStart time.Time
+	LastError        *DeliveryError
+	LastStatusCode   *int
 
 	CreatedAt   time.Time
 	UpdatedAt   time.Time

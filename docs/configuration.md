@@ -91,6 +91,19 @@ retry:
 Fields you don't set come from `preset` if it's given, and otherwise from the defaults. The same
 format is accepted per request in the API, so a request can override its upstream's policy.
 
+#### How retries behave
+
+- **What is retried:** network errors, timeouts, `408`, `425`, `429` and `5xx`. Other `4xx` responses
+  and `3xx` redirects (which are never followed) move the request straight to the dead-letter queue,
+  because retrying the same request can't succeed.
+- **When:** after attempt *n* the delay is random between 0 and
+  `min(max_interval, initial_interval × multiplier^(n-1))` ("full jitter"), so many failed requests
+  don't all retry at the same moment. A `Retry-After` header on a `429` or `503` replaces the
+  computed delay.
+- **Until when:** a request goes to the dead-letter queue after `max_attempts`, or as soon as its next
+  attempt would fall outside `max_age`. `max_age` starts when the request becomes due (its creation,
+  or `deliver_at` for scheduled requests) and starts over when a request is replayed.
+
 ### Environment variable references
 
 String values can reference environment variables, which keeps secrets out of the file:

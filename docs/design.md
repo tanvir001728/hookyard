@@ -90,8 +90,10 @@ headers, so applications can't override them.
   delivery survives restarts and needs no extra infrastructure.
 - **Per-upstream isolation.** Each upstream has its own concurrency cap and token-bucket rate limit, so
   one slow vendor can't starve deliveries to others.
-- **Retries.** Exponential backoff with full jitter, honoring `Retry-After`. Named presets (`none`,
-  `quick`, `standard`, `patient`) or a custom policy.
+- **Retries.** Exponential backoff with full jitter, honoring `Retry-After` on `429`/`503`. Named
+  presets (`none`, `quick`, `standard`, `patient`) or a custom policy. Network errors, timeouts,
+  `408`, `425`, `429` and `5xx` are retried; other `4xx` and `3xx` are permanent. `max_age` is
+  measured from when a request becomes due and restarts on replay.
 - **Circuit breaker with pause semantics.** When an upstream's breaker opens, its requests stay queued
   instead of failing or burning retries. Half-open probes resume delivery once the vendor recovers.
 - **Response classification.** Rules match on status code and response body (JSON path) to decide

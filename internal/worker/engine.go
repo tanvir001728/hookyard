@@ -69,7 +69,7 @@ func New(log *slog.Logger, st *store.Store, upstreams *config.Registry, cfg Conf
 		store:     st,
 		upstreams: upstreams,
 		client:    newHTTPClient(),
-		decide:    decideFixedInterval,
+		decide:    PolicyDecider(nil),
 		wake:      make(chan struct{}, 1),
 		now:       time.Now,
 	}
@@ -106,9 +106,6 @@ func (e *Engine) Run(ctx context.Context) error {
 		e.recoverLoop(ctx)
 	}()
 
-	ticker := time.NewTicker(e.cfg.PollInterval)
-	defer ticker.Stop()
-
 	for ctx.Err() == nil {
 		free := cap(slots) - len(slots)
 		claimed := 0
@@ -139,12 +136,14 @@ func (e *Engine) Run(ctx context.Context) error {
 		if free > 0 && claimed == free {
 			continue
 		}
+		timer := time.NewTimer(e.idleWait(ctx))
 		select {
 		case <-ctx.Done():
 		case <-e.wake:
-		case <-ticker.C:
+		case <-timer.C:
 		case <-freed:
 		}
+		timer.Stop()
 	}
 
 	e.log.Info("delivery engine stopping", "in_flight", len(slots), "drain_timeout", e.cfg.DrainTimeout)
@@ -162,6 +161,16 @@ func (e *Engine) Run(ctx context.Context) error {
 		e.log.Warn("delivery engine stopped before all deliveries finished; they will be retried after their leases expire")
 	}
 	return nil
+}
+
+// idleWait returns how long to sleep before checking the queue again: until
+// the next retry is due, but never longer than the poll interval.
+func (e *Engine) idleWait(ctx context.Context) time.Duration {
+	next, err := e.store.NextDueAt(ctx)
+	if err != nil || next == nil {
+		return e.cfg.PollInterval
+	}
+	return min(max(next.Sub(e.now()), time.Millisecond), e.cfg.PollInterval)
 }
 
 func (e *Engine) recoverLoop(ctx context.Context) {

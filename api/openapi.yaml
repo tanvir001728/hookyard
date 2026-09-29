@@ -23,6 +23,15 @@ info:
     - **Timestamps** are RFC 3339 in UTC.
     - **Errors** always use the `Error` schema, and `error.code` is stable and safe to branch on.
     - **Pagination** is cursor based: pass `next_cursor` from a response as `cursor` to get the next page.
+
+    ## Delivery
+
+    - Network errors, timeouts, `408`, `425`, `429` and `5xx` responses are retried with exponential
+      backoff and full jitter. A `Retry-After` header on `429` or `503` sets the delay.
+    - Other `4xx` responses and `3xx` redirects (never followed) are permanent failures: the request
+      moves to the dead-letter queue immediately.
+    - Every delivery carries `Hookyard-Request-Id` and `Hookyard-Attempt` headers, which upstreams can
+      use to detect retries.
   license:
     name: MIT
     identifier: MIT
