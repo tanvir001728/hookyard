@@ -25,6 +25,17 @@ jobs:
         with:
           version: v2.14.0
 
+  api:
+    name: API spec
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Lint OpenAPI spec
+        run: make api-lint
+
   test:
     name: Test
     runs-on: ubuntu-latest

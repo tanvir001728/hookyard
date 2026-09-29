@@ -98,6 +98,8 @@ const job = await hy.to("courier-x").post("/shipments", body, {
 const outcome = await job.result({ timeout: "30s" }); // optional: wait for the outcome
 ```
 
+The HTTP API is described in [`api/openapi.yaml`](api/openapi.yaml) (OpenAPI 3.1).
+
 **Manage everything from code.** Anything you can do in the dashboard is also available in the API,
 the SDK and the CLI:
 

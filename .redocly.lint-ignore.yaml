@@ -1,0 +1,6 @@
+# Intentional exceptions to lint rules, reviewed by maintainers.
+api/openapi.yaml:
+  operation-4xx-response:
+    # Health probes are unauthenticated and have no client-error responses.
+    - '#/paths/~1healthz/get/responses'
+    - '#/paths/~1readyz/get/responses'
