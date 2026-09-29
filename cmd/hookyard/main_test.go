@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -49,5 +51,30 @@ func TestMigrateRejectsUnknownAction(t *testing.T) {
 	err := run(context.Background(), args, &bytes.Buffer{}, &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), `unknown migrate action "down"`) {
 		t.Fatalf("expected unknown action error, got %v", err)
+	}
+}
+
+func TestValidate(t *testing.T) {
+	dir := t.TempDir()
+	good := filepath.Join(dir, "good.yaml")
+	bad := filepath.Join(dir, "bad.yaml")
+	if err := os.WriteFile(good, []byte("upstreams:\n  courier-x:\n    base_url: https://api.courier-x.example\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(bad, []byte("upstreams:\n  courier-x:\n    base_url: nope\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	if err := run(context.Background(), []string{"validate", "-config", good}, &out, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "is valid: 1 upstream(s)") || !strings.Contains(out.String(), "courier-x") {
+		t.Errorf("unexpected output: %s", out.String())
+	}
+
+	err := run(context.Background(), []string{"validate", "-config", bad}, &bytes.Buffer{}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "upstreams.courier-x.base_url") {
+		t.Errorf("expected base_url error, got %v", err)
 	}
 }

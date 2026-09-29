@@ -11,5 +11,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Project documentation, community guidelines and contribution templates.
 - `hookyard serve` with `/healthz` and `/readyz` endpoints, structured logging and graceful shutdown.
+- Upstream registry in `hookyard.yaml`: defaults, retry presets (`none`, `quick`, `standard`, `patient`) with per-field overrides, static headers, `${ENV_VAR}` interpolation, strict validation with line numbers, and `hookyard validate`.
 - Postgres storage with embedded, lock-protected migrations; `hookyard migrate [up|status]`; `HOOKYARD_DATABASE_URL` and `HOOKYARD_AUTO_MIGRATE` settings; `/readyz` checks the database.
 - OpenAPI 3.1 specification for the v1 API (`api/openapi.yaml`), linted in CI.

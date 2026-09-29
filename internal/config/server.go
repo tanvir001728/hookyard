@@ -27,6 +27,9 @@ type Server struct {
 	DatabaseURL string
 	// AutoMigrate applies pending database migrations on startup.
 	AutoMigrate bool
+	// ConfigFile is the path of hookyard.yaml. Empty means DefaultConfigFile
+	// if it exists.
+	ConfigFile string
 }
 
 // DefaultServer returns the built-in defaults.
@@ -63,6 +66,9 @@ func ServerFromEnv(lookup func(string) (string, bool)) (Server, error) {
 			return cfg, fmt.Errorf("HOOKYARD_SHUTDOWN_TIMEOUT: %w", err)
 		}
 		cfg.ShutdownTimeout = d
+	}
+	if v, ok := lookup("HOOKYARD_CONFIG"); ok {
+		cfg.ConfigFile = v
 	}
 	if v, ok := lookup("HOOKYARD_DATABASE_URL"); ok {
 		cfg.DatabaseURL = v

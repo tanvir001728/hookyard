@@ -19,6 +19,7 @@ import (
 	"github.com/tanvir001728/hookyard/internal/api"
 	"github.com/tanvir001728/hookyard/internal/config"
 	"github.com/tanvir001728/hookyard/internal/logging"
+	"github.com/tanvir001728/hookyard/internal/model"
 	"github.com/tanvir001728/hookyard/internal/store"
 	"github.com/tanvir001728/hookyard/internal/version"
 )
@@ -31,6 +32,7 @@ Usage:
 Commands:
   serve     Run the Hookyard server
   migrate   Apply database migrations, or show their status
+  validate  Check a hookyard.yaml config file
   version   Print version information
 
 Run "hookyard <command> -h" for command flags.
@@ -59,6 +61,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return serve(ctx, args[1:], stderr)
 	case "migrate":
 		return migrate(ctx, args[1:], stdout, stderr)
+	case "validate":
+		return validate(args[1:], stdout, stderr)
 	case "version", "--version", "-v":
 		fmt.Fprintln(stdout, version.String())
 		return nil
@@ -110,6 +114,7 @@ func serve(ctx context.Context, args []string, stderr io.Writer) error {
 		fs.StringVar(&cfg.Addr, "addr", cfg.Addr, "listen address (env HOOKYARD_ADDR)")
 		fs.DurationVar(&cfg.ShutdownTimeout, "shutdown-timeout", cfg.ShutdownTimeout, "graceful shutdown timeout (env HOOKYARD_SHUTDOWN_TIMEOUT)")
 		fs.BoolVar(&cfg.AutoMigrate, "auto-migrate", cfg.AutoMigrate, "apply database migrations on startup (env HOOKYARD_AUTO_MIGRATE)")
+		fs.StringVar(&cfg.ConfigFile, "config", cfg.ConfigFile, "path to hookyard.yaml (env HOOKYARD_CONFIG)")
 	})
 	if err != nil {
 		return err
@@ -118,6 +123,16 @@ func serve(ctx context.Context, args []string, stderr io.Writer) error {
 	log, err := logging.New(stderr, cfg.LogFormat, cfg.LogLevel)
 	if err != nil {
 		return err
+	}
+
+	file, err := config.LoadFile(cfg.ConfigFile, nil)
+	if err != nil {
+		return err
+	}
+	if file.Path == "" {
+		log.Warn("no config file found; no upstreams are configured", "hint", "create hookyard.yaml or set HOOKYARD_CONFIG")
+	} else {
+		log.Info("loaded config", "file", file.Path, "upstreams", file.Upstreams.Names())
 	}
 
 	db, err := openStore(ctx, cfg)
@@ -241,4 +256,37 @@ func migrate(ctx context.Context, args []string, stdout, stderr io.Writer) error
 	}
 	log.Debug("migration status listed", "count", len(statuses))
 	return nil
+}
+
+func validate(args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("validate", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	path := fs.String("config", os.Getenv("HOOKYARD_CONFIG"), "path to hookyard.yaml (env HOOKYARD_CONFIG)")
+	fs.Usage = func() {
+		fmt.Fprint(fs.Output(), "Usage:\n  hookyard validate [-config hookyard.yaml]\n\nChecks a config file, including that referenced environment variables are set.\n\nFlags:\n")
+		fs.PrintDefaults()
+	}
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *path == "" {
+		*path = config.DefaultConfigFile
+	}
+
+	file, err := config.LoadFile(*path, nil)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "%s is valid: %d upstream(s)\n", file.Path, file.Upstreams.Len())
+	for _, u := range file.Upstreams.All() {
+		fmt.Fprintf(stdout, "  %-20s %s (timeout %s, retry %s)\n", u.Name, u.BaseURL, model.FormatDuration(u.Timeout), retryLabel(u.Retry))
+	}
+	return nil
+}
+
+func retryLabel(p model.RetryPolicy) string {
+	if p.Preset != "" {
+		return fmt.Sprintf("%s, %d attempts", p.Preset, p.MaxAttempts)
+	}
+	return fmt.Sprintf("custom, %d attempts", p.MaxAttempts)
 }

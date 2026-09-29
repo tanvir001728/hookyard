@@ -1,0 +1,37 @@
+# Hookyard configuration. Copy to hookyard.yaml and adjust.
+#
+# String values may reference environment variables:
+#   ${NAME}            fails at startup if NAME is not set
+#   ${NAME:-default}   uses "default" if NAME is not set
+#   $$                 a literal "$"
+#
+# Check a file with: hookyard validate -config hookyard.yaml
+
+# Defaults apply to every upstream unless the upstream overrides them.
+defaults:
+  timeout: 30s            # per-attempt timeout (max 10m)
+  retry: standard         # none | quick | standard | patient, or a policy object
+  dedupe_window: 24h      # how long a dedupe_key is remembered
+
+upstreams:
+  # Applications refer to upstreams by name: POST /v1/requests {"upstream": "courier-x", ...}
+  courier-x:
+    base_url: https://api.courier-x.example/v2
+    timeout: 15s
+    retry:
+      preset: patient     # start from a preset...
+      max_attempts: 20    # ...and override individual fields
+    headers:              # added to every request; values are never returned by the API
+      Authorization: "Bearer ${COURIER_X_TOKEN}"
+      X-Api-Version: "2024-01"
+
+  payments-y:
+    base_url: https://payments.example
+    retry:                # a fully custom policy
+      max_attempts: 8
+      initial_interval: 2s
+      max_interval: 5m
+      multiplier: 3
+      max_age: 6h
+    headers:
+      X-Api-Key: "${PAYMENTS_Y_API_KEY}"
