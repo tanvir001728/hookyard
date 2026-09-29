@@ -15,10 +15,11 @@ import (
 
 // Server is the root HTTP handler for Hookyard.
 type Server struct {
-	log    *slog.Logger
-	mux    *http.ServeMux
-	checks map[string]ReadinessCheck
-	v1     *V1
+	log     *slog.Logger
+	mux     *http.ServeMux
+	checks  map[string]ReadinessCheck
+	v1      *V1
+	metrics http.Handler
 }
 
 // V1 holds the dependencies of the /v1 API.
@@ -30,6 +31,11 @@ type V1 struct {
 	// Notify, if set, is called after a request is enqueued so delivery can
 	// start without waiting for the next poll.
 	Notify func()
+}
+
+// WithMetrics serves h at /metrics (Prometheus format, unauthenticated).
+func WithMetrics(h http.Handler) Option {
+	return func(s *Server) { s.metrics = h }
 }
 
 // WithV1 enables the /v1 API.
@@ -62,6 +68,9 @@ func New(log *slog.Logger, opts ...Option) *Server {
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /healthz", s.handleHealthz)
 	s.mux.HandleFunc("GET /readyz", s.handleReadyz)
+	if s.metrics != nil {
+		s.mux.Handle("GET /metrics", s.metrics)
+	}
 
 	if s.v1 != nil {
 		v1 := func(pattern string, h http.HandlerFunc) {
@@ -77,6 +86,8 @@ func (s *Server) routes() {
 		v1("POST /v1/dlq/replay", s.handleDLQReplay)
 		v1("GET /v1/upstreams", s.handleListUpstreams)
 		v1("GET /v1/upstreams/{name}", s.handleGetUpstream)
+		v1("GET /v1/stats/overview", s.handleStatsOverview)
+		v1("GET /v1/stats/timeseries", s.handleStatsTimeseries)
 	}
 	// Unmatched /v1 routes get a JSON 404 instead of the default text page.
 	s.mux.HandleFunc("/v1/", func(w http.ResponseWriter, r *http.Request) {
@@ -97,7 +108,7 @@ func (s *Server) withAccessLog(next http.Handler) http.Handler {
 
 		// Probes are frequent and uninteresting; keep them out of info logs.
 		level := slog.LevelInfo
-		if r.URL.Path == "/healthz" || r.URL.Path == "/readyz" {
+		if r.URL.Path == "/healthz" || r.URL.Path == "/readyz" || r.URL.Path == "/metrics" {
 			level = slog.LevelDebug
 		}
 		s.log.Log(r.Context(), level, "http request",

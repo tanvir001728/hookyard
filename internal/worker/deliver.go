@@ -88,6 +88,10 @@ func (e *Engine) deliver(ctx context.Context, c store.Claim) {
 		return
 	}
 
+	if e.cfg.Observer != nil {
+		e.cfg.Observer(req.Upstream, finished, attempt.Duration, d.Outcome, d.Status)
+	}
+
 	attrs := []any{"status", d.Status, "http_status", result.StatusCode, "duration", attempt.Duration}
 	if result.Error != nil {
 		attrs = append(attrs, "error", result.Error.Message)

@@ -20,6 +20,8 @@ import (
 	"github.com/tanvir001728/hookyard/internal/config"
 	"github.com/tanvir001728/hookyard/internal/logging"
 	"github.com/tanvir001728/hookyard/internal/model"
+	"github.com/tanvir001728/hookyard/internal/retention"
+	"github.com/tanvir001728/hookyard/internal/stats"
 	"github.com/tanvir001728/hookyard/internal/store"
 	"github.com/tanvir001728/hookyard/internal/version"
 	"github.com/tanvir001728/hookyard/internal/worker"
@@ -152,22 +154,39 @@ func serve(ctx context.Context, args []string, stderr io.Writer) error {
 		}
 	}
 
+	collector := stats.NewCollector(log, db)
 	engine := worker.New(log, db, file.Upstreams, worker.Config{
 		Workers:      cfg.Workers,
 		PollInterval: cfg.PollInterval,
 		DrainTimeout: cfg.ShutdownTimeout,
+		Observer:     collector.Observe,
 	})
 	engineCtx, stopEngine := context.WithCancel(ctx)
 	defer stopEngine()
 	engineDone := make(chan error, 1)
 	go func() { engineDone <- engine.Run(engineCtx) }()
 
+	// Background maintenance stops with the process; the collector flushes
+	// once more after the engine has drained.
+	collectorCtx, stopCollector := context.WithCancel(context.WithoutCancel(ctx))
+	collectorDone := make(chan struct{})
+	go func() {
+		defer close(collectorDone)
+		collector.Run(collectorCtx, 10*time.Second)
+	}()
+	go retention.Run(engineCtx, log, db, retention.Config{Requests: cfg.RequestRetention})
+
+	apiOpts := []api.Option{
+		api.WithReadinessCheck("database", db.Ping),
+		api.WithV1(api.V1{Store: db, Config: file, Tokens: cfg.APITokens, MaxBody: cfg.MaxBodyBytes, Notify: engine.Notify}),
+	}
+	if cfg.Metrics {
+		apiOpts = append(apiOpts, api.WithMetrics(collector.MetricsHandler(queueGauges(db))))
+	}
+
 	srv := &http.Server{
-		Addr: cfg.Addr,
-		Handler: api.New(log,
-			api.WithReadinessCheck("database", db.Ping),
-			api.WithV1(api.V1{Store: db, Config: file, Tokens: cfg.APITokens, MaxBody: cfg.MaxBodyBytes, Notify: engine.Notify}),
-		),
+		Addr:              cfg.Addr,
+		Handler:           api.New(log, apiOpts...),
 		ReadHeaderTimeout: 10 * time.Second,
 		BaseContext:       func(net.Listener) context.Context { return ctx },
 	}
@@ -182,6 +201,8 @@ func serve(ctx context.Context, args []string, stderr io.Writer) error {
 	case err := <-errCh:
 		stopEngine()
 		<-engineDone
+		stopCollector()
+		<-collectorDone
 		return fmt.Errorf("http server: %w", err)
 	case <-ctx.Done():
 	}
@@ -193,11 +214,27 @@ func serve(ctx context.Context, args []string, stderr io.Writer) error {
 	// while the HTTP server finishes open requests.
 	httpErr := srv.Shutdown(shutdownCtx)
 	engineErr := <-engineDone
+	stopCollector()
+	<-collectorDone
 	if err := errors.Join(httpErr, engineErr); err != nil {
 		return fmt.Errorf("graceful shutdown: %w", err)
 	}
 	log.Info("shutdown complete")
 	return nil
+}
+
+func queueGauges(db *store.Store) stats.QueueGauges {
+	return func(ctx context.Context) (map[string]stats.QueueGauge, error) {
+		q, err := db.QueueStats(ctx)
+		if err != nil {
+			return nil, err
+		}
+		out := make(map[string]stats.QueueGauge, len(q))
+		for u, s := range q {
+			out[u] = stats.QueueGauge{Waiting: s.Waiting, Dead: s.Dead}
+		}
+		return out, nil
+	}
 }
 
 func applyMigrations(ctx context.Context, db *store.Store, log *slog.Logger) error {

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/tanvir001728/hookyard/internal/config"
+	"github.com/tanvir001728/hookyard/internal/model"
 	"github.com/tanvir001728/hookyard/internal/store"
 )
 
@@ -28,7 +29,14 @@ type Config struct {
 	// DrainTimeout bounds how long Run waits for in-flight deliveries after
 	// its context is canceled.
 	DrainTimeout time.Duration
+	// Observer, if set, is told about every recorded attempt (for metrics).
+	Observer Observer
 }
+
+// Observer receives each recorded attempt: the upstream, when the attempt
+// finished, how long it took, how it was classified and the request's
+// resulting status.
+type Observer func(upstream string, finishedAt time.Time, d time.Duration, outcome model.AttemptOutcome, status model.Status)
 
 func (c Config) withDefaults() Config {
 	if c.Workers <= 0 {
