@@ -46,7 +46,18 @@ func TestServeRequiresDatabaseURL(t *testing.T) {
 	}
 }
 
+func TestServeRequiresAPIToken(t *testing.T) {
+	t.Setenv("HOOKYARD_API_TOKENS", "")
+	args := []string{"serve", "-database-url", "postgres://localhost/hookyard"}
+	err := run(context.Background(), args, &bytes.Buffer{}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "HOOKYARD_API_TOKENS") {
+		t.Fatalf("expected an error naming HOOKYARD_API_TOKENS, got %v", err)
+	}
+}
+
+// migrate must not require server-only settings such as API tokens.
 func TestMigrateRejectsUnknownAction(t *testing.T) {
+	t.Setenv("HOOKYARD_API_TOKENS", "")
 	args := []string{"migrate", "-database-url", "postgres://localhost/hookyard", "down"}
 	err := run(context.Background(), args, &bytes.Buffer{}, &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), `unknown migrate action "down"`) {

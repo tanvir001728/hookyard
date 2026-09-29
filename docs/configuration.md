@@ -11,12 +11,27 @@ Hookyard reads two kinds of settings:
 | Variable | Flag | Default | Description |
 | --- | --- | --- | --- |
 | `HOOKYARD_DATABASE_URL` | `-database-url` | *(required)* | Postgres connection string |
+| `HOOKYARD_API_TOKENS` | | *(required)* | Comma-separated API tokens, each `secret` or `name:secret` (see below) |
 | `HOOKYARD_CONFIG` | `-config` | `hookyard.yaml` if present | Path to the config file |
 | `HOOKYARD_ADDR` | `-addr` | `:8080` | HTTP listen address |
 | `HOOKYARD_LOG_LEVEL` | `-log-level` | `info` | `debug`, `info`, `warn` or `error` |
 | `HOOKYARD_LOG_FORMAT` | `-log-format` | `text` | `text` or `json` |
 | `HOOKYARD_AUTO_MIGRATE` | `-auto-migrate` | `true` | Apply database migrations on startup |
 | `HOOKYARD_SHUTDOWN_TIMEOUT` | `-shutdown-timeout` | `30s` | Graceful shutdown limit |
+| `HOOKYARD_MAX_BODY_BYTES` | | `1048576` | Maximum API request body size (1 KiB to 64 MiB) |
+
+### API tokens
+
+Every `/v1` call needs `Authorization: Bearer <token>`. Hookyard refuses to start without at least
+one token, because an open API would let anyone send requests with your vendor credentials.
+
+```sh
+HOOKYARD_API_TOKENS="orders:$(openssl rand -hex 32),billing:$(openssl rand -hex 32)"
+```
+
+The name before `:` identifies the caller in logs and the audit log. Unnamed tokens are called
+`token-1`, `token-2`, and so on. Tokens must be at least 16 characters. To rotate a token, add the new
+one, deploy, move clients over, then remove the old one.
 
 ## The config file
 

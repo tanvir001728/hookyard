@@ -517,7 +517,9 @@ components:
 
   responses:
     BadRequest:
-      description: The request is malformed (invalid JSON, unknown fields or bad query parameters).
+      description: |
+        The request is malformed: invalid JSON, unknown fields or bad query parameters. Request
+        bodies are always parsed as JSON, whatever the `Content-Type` header says.
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
@@ -527,6 +529,10 @@ components:
               message: "invalid query parameter \"limit\": must be between 1 and 200"
     Unauthorized:
       description: The bearer token is missing or invalid.
+      headers:
+        WWW-Authenticate:
+          description: Always `Bearer realm="hookyard"`.
+          schema: { type: string }
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
@@ -676,7 +682,9 @@ components:
         max_age:
           allOf:
             - $ref: "#/components/schemas/Duration"
-          description: Give up (move to the DLQ) once this much time has passed since the request was created.
+          description: |
+            Give up (move to the DLQ) once this much time has passed since the request became due: its
+            creation time, or `deliver_at` for scheduled requests.
       example:
         preset: standard
         max_attempts: 5
@@ -717,7 +725,11 @@ components:
           maxLength: 2048
           example: /shipments?notify=true
         headers:
-          $ref: "#/components/schemas/Headers"
+          allOf:
+            - $ref: "#/components/schemas/Headers"
+          description: |
+            Headers for this request. Headers configured on the upstream (typically credentials) take
+            precedence. `Host`, `Content-Length` and hop-by-hop headers can't be set.
         body:
           description: |
             Request body. A JSON object, array, number or boolean is sent as JSON with
