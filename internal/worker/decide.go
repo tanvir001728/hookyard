@@ -40,16 +40,19 @@ func PolicyDecider(rnd func() float64) Decider {
 			outcome = model.OutcomeRetryableFailure
 		}
 
+		// Count attempts since the last replay, which granted a fresh budget.
+		n := attempt - req.RetryAttemptBase
+
 		switch {
 		case outcome == model.OutcomeSuccess:
 			return Decision{Outcome: outcome, Status: model.StatusSucceeded}
 		case outcome == model.OutcomePermanentFailure:
 			return Decision{Outcome: outcome, Status: model.StatusDead}
-		case attempt >= req.Retry.MaxAttempts:
+		case n >= req.Retry.MaxAttempts:
 			return Decision{Outcome: outcome, Status: model.StatusDead}
 		}
 
-		delay := retry.Backoff(req.Retry, attempt, rnd)
+		delay := retry.Backoff(req.Retry, n, rnd)
 		if retry.HonorsRetryAfter(res.StatusCode) && res.Headers != nil {
 			if d, ok := retry.ParseRetryAfter(res.Headers.Get("Retry-After"), now); ok {
 				delay = d
@@ -61,7 +64,7 @@ func PolicyDecider(rnd func() float64) Decider {
 			return Decision{Outcome: outcome, Status: model.StatusDead, LastError: &model.DeliveryError{
 				Code: ErrCodeMaxAgeExceeded,
 				Message: fmt.Sprintf("gave up after %d attempt(s): the next attempt would be after max_age (%s) ran out; last error: %s",
-					attempt, model.FormatDuration(req.Retry.MaxAge), errorMessage(res)),
+					n, model.FormatDuration(req.Retry.MaxAge), errorMessage(res)),
 			}}
 		}
 		return Decision{Outcome: outcome, Status: model.StatusFailed, RetryAt: &next}
