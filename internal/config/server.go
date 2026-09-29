@@ -34,6 +34,10 @@ type Server struct {
 	APITokens []APIToken
 	// MaxBodyBytes limits the size of API request bodies.
 	MaxBodyBytes int64
+	// Workers is the maximum number of concurrent deliveries.
+	Workers int
+	// PollInterval is how often the queue is checked when idle.
+	PollInterval time.Duration
 }
 
 // DefaultMaxBodyBytes is the default limit for API request bodies (1 MiB).
@@ -48,6 +52,8 @@ func DefaultServer() Server {
 		ShutdownTimeout: 30 * time.Second,
 		AutoMigrate:     true,
 		MaxBodyBytes:    DefaultMaxBodyBytes,
+		Workers:         32,
+		PollInterval:    time.Second,
 	}
 }
 
@@ -95,6 +101,20 @@ func ServerFromEnv(lookup func(string) (string, bool)) (Server, error) {
 		}
 		cfg.MaxBodyBytes = n
 	}
+	if v, ok := lookup("HOOKYARD_WORKERS"); ok {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return cfg, fmt.Errorf("HOOKYARD_WORKERS: %w", err)
+		}
+		cfg.Workers = n
+	}
+	if v, ok := lookup("HOOKYARD_POLL_INTERVAL"); ok {
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			return cfg, fmt.Errorf("HOOKYARD_POLL_INTERVAL: %w", err)
+		}
+		cfg.PollInterval = d
+	}
 	if v, ok := lookup("HOOKYARD_AUTO_MIGRATE"); ok {
 		b, err := strconv.ParseBool(v)
 		if err != nil {
@@ -133,6 +153,12 @@ func (s Server) ValidateServe() error {
 	}
 	if len(s.APITokens) == 0 {
 		errs = append(errs, errors.New("at least one API token is required: set HOOKYARD_API_TOKENS, for example HOOKYARD_API_TOKENS=\"orders:$(openssl rand -hex 32)\""))
+	}
+	if s.Workers < 1 || s.Workers > 1024 {
+		errs = append(errs, errors.New("workers must be between 1 and 1024 (HOOKYARD_WORKERS)"))
+	}
+	if s.PollInterval < 10*time.Millisecond || s.PollInterval > time.Minute {
+		errs = append(errs, errors.New("poll interval must be between 10ms and 1m (HOOKYARD_POLL_INTERVAL)"))
 	}
 	if s.MaxBodyBytes < 1024 || s.MaxBodyBytes > 64<<20 {
 		errs = append(errs, errors.New("max body size must be between 1 KiB and 64 MiB (HOOKYARD_MAX_BODY_BYTES)"))

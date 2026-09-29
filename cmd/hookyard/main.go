@@ -22,6 +22,7 @@ import (
 	"github.com/tanvir001728/hookyard/internal/model"
 	"github.com/tanvir001728/hookyard/internal/store"
 	"github.com/tanvir001728/hookyard/internal/version"
+	"github.com/tanvir001728/hookyard/internal/worker"
 )
 
 const usage = `Hookyard: reliable delivery for outbound API calls.
@@ -151,11 +152,21 @@ func serve(ctx context.Context, args []string, stderr io.Writer) error {
 		}
 	}
 
+	engine := worker.New(log, db, file.Upstreams, worker.Config{
+		Workers:      cfg.Workers,
+		PollInterval: cfg.PollInterval,
+		DrainTimeout: cfg.ShutdownTimeout,
+	})
+	engineCtx, stopEngine := context.WithCancel(ctx)
+	defer stopEngine()
+	engineDone := make(chan error, 1)
+	go func() { engineDone <- engine.Run(engineCtx) }()
+
 	srv := &http.Server{
 		Addr: cfg.Addr,
 		Handler: api.New(log,
 			api.WithReadinessCheck("database", db.Ping),
-			api.WithV1(api.V1{Store: db, Config: file, Tokens: cfg.APITokens, MaxBody: cfg.MaxBodyBytes}),
+			api.WithV1(api.V1{Store: db, Config: file, Tokens: cfg.APITokens, MaxBody: cfg.MaxBodyBytes, Notify: engine.Notify}),
 		),
 		ReadHeaderTimeout: 10 * time.Second,
 		BaseContext:       func(net.Listener) context.Context { return ctx },
@@ -169,6 +180,8 @@ func serve(ctx context.Context, args []string, stderr io.Writer) error {
 
 	select {
 	case err := <-errCh:
+		stopEngine()
+		<-engineDone
 		return fmt.Errorf("http server: %w", err)
 	case <-ctx.Done():
 	}
@@ -176,7 +189,11 @@ func serve(ctx context.Context, args []string, stderr io.Writer) error {
 	log.Info("shutting down", "timeout", cfg.ShutdownTimeout)
 	shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cfg.ShutdownTimeout)
 	defer cancel()
-	if err := srv.Shutdown(shutdownCtx); err != nil {
+	// The engine drains in-flight deliveries (bounded by the same timeout)
+	// while the HTTP server finishes open requests.
+	httpErr := srv.Shutdown(shutdownCtx)
+	engineErr := <-engineDone
+	if err := errors.Join(httpErr, engineErr); err != nil {
 		return fmt.Errorf("graceful shutdown: %w", err)
 	}
 	log.Info("shutdown complete")
