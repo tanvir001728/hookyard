@@ -168,7 +168,7 @@ func TestDLQ(t *testing.T) {
 		} `json:"groups"`
 	}
 	a.do(http.MethodGet, "/v1/dlq", "", &summary)
-	if summary.Total != 3 || len(summary.Groups) != 1 || summary.Groups[0].StatusCode != 400 || summary.Groups[0].Count != 3 {
+	if summary.Total != 3 || len(summary.Groups) != 1 || summary.Groups[0].StatusCode != http.StatusBadRequest || summary.Groups[0].Count != 3 {
 		t.Errorf("summary = %+v", summary)
 	}
 
