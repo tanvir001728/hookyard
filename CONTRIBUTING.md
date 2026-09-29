@@ -34,9 +34,16 @@ Prerequisites: **Go 1.25+**, **Node.js 22+** with **pnpm**, and **Docker**.
 ```sh
 git clone git@github.com:tanvir001728/hookyard.git
 cd hookyard
+
+make help        # list all development tasks
+make dev-db      # start Postgres in Docker (set HOOKYARD_DEV_DB_PORT to change the port)
+make build       # build ./bin/hookyard
+make run         # build and start the server on :8080
+make lint test   # what CI runs
 ```
 
-Build, test and local-run instructions will be added here as soon as the first code lands.
+Linting uses [golangci-lint v2](https://golangci-lint.run/welcome/install/). Install it, or point
+`GOLANGCI_LINT` at your binary.
 
 ## Pull request process
 

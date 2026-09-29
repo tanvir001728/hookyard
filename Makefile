@@ -1,0 +1,58 @@
+SHELL := /bin/bash
+
+BIN_DIR   := bin
+VERSION   ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+COMMIT    ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
+DATE      ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+VERSION_PKG := github.com/tanvir001728/hookyard/internal/version
+LDFLAGS   := -s -w -X $(VERSION_PKG).Version=$(VERSION) -X $(VERSION_PKG).Commit=$(COMMIT) -X $(VERSION_PKG).Date=$(DATE)
+
+GOLANGCI_LINT ?= golangci-lint
+DEV_COMPOSE   := docker compose -f deploy/docker-compose.dev.yml
+
+.DEFAULT_GOAL := help
+
+.PHONY: help
+help: ## Show this help
+	@awk 'BEGIN {FS = ":.*##"; printf "Usage: make \033[36m<target>\033[0m\n\n"} /^[a-zA-Z_-]+:.*?##/ { printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
+
+.PHONY: build
+build: ## Build the hookyard binary into ./bin
+	go build -trimpath -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/hookyard ./cmd/hookyard
+
+.PHONY: run
+run: build ## Build and run the server
+	./$(BIN_DIR)/hookyard serve
+
+.PHONY: test
+test: ## Run tests with the race detector
+	go test -race -count=1 ./...
+
+.PHONY: cover
+cover: ## Run tests and open a coverage report
+	go test -race -coverprofile=coverage.out ./...
+	go tool cover -html=coverage.out
+
+.PHONY: lint
+lint: ## Run golangci-lint
+	$(GOLANGCI_LINT) run ./...
+
+.PHONY: fmt
+fmt: ## Format Go code
+	$(GOLANGCI_LINT) fmt ./...
+
+.PHONY: tidy
+tidy: ## Tidy go.mod and go.sum
+	go mod tidy
+
+.PHONY: dev-db
+dev-db: ## Start a local Postgres for development
+	$(DEV_COMPOSE) up -d --wait
+
+.PHONY: dev-db-down
+dev-db-down: ## Stop the local Postgres (keeps data)
+	$(DEV_COMPOSE) down
+
+.PHONY: clean
+clean: ## Remove build artifacts
+	rm -rf $(BIN_DIR) coverage.out

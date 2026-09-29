@@ -7,3 +7,11 @@ updates:
     commit-message:
       prefix: ci
     labels: ["type: dependencies"]
+
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: build
+    labels: ["type: dependencies"]

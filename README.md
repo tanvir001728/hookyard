@@ -7,6 +7,8 @@
 Hand Hookyard a request to a third-party API and move on. It delivers the request, retries it, parks it
 when the vendor is down, and shows you everything that happened.
 
+[![CI](https://github.com/tanvir001728/hookyard/actions/workflows/ci.yml/badge.svg)](https://github.com/tanvir001728/hookyard/actions/workflows/ci.yml)
+[![Go Report Card](https://goreportcard.com/badge/github.com/tanvir001728/hookyard)](https://goreportcard.com/report/github.com/tanvir001728/hookyard)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Status: early development](https://img.shields.io/badge/status-early%20development-orange.svg)](#project-status)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
