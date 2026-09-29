@@ -1,0 +1,63 @@
+name: 🐛 Bug report
+description: Something isn't working as expected
+labels: ["type: bug", "status: triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug! Please search
+        [existing issues](https://github.com/tanvir001728/hookyard/issues) first.
+        **Security vulnerabilities must be reported privately**; see [SECURITY.md](https://github.com/tanvir001728/hookyard/blob/main/SECURITY.md).
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: A clear description of the bug.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Minimal steps, config and requests that reproduce the issue.
+      placeholder: |
+        1. Configure upstream `...`
+        2. Send `POST /v1/requests` with `...`
+        3. See error
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs or output
+      description: Please redact secrets and personal data. This is rendered as code automatically.
+      render: shell
+  - type: input
+    id: version
+    attributes:
+      label: Hookyard version
+      placeholder: v0.1.0 or commit SHA
+    validations:
+      required: true
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: Deployment
+      options:
+        - Docker / Docker Compose
+        - Binary
+        - Kubernetes
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Postgres version, SDK version (if relevant)

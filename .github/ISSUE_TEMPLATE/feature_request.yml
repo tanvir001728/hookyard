@@ -1,0 +1,50 @@
+name: ✨ Feature request
+description: Suggest an idea or improvement
+labels: ["type: feature", "status: triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping shape Hookyard! Please check the
+        [roadmap milestones](https://github.com/tanvir001728/hookyard/milestones) and
+        [existing issues](https://github.com/tanvir001728/hookyard/issues) first.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve?
+      description: Describe the use case and why it matters. Focus on the problem, not the solution.
+      placeholder: When calling vendor X, I need to ...
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: How would you like Hookyard to solve it? API, SDK or UI sketches are very welcome.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Workarounds you use today or other approaches you considered.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      multiple: true
+      options:
+        - Delivery engine (queue, retries, DLQ)
+        - Resilience (circuit breaker, rate limits)
+        - API
+        - TypeScript SDK
+        - Dashboard
+        - CLI
+        - Deployment
+        - Docs
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Contribution
+      options:
+        - label: I'd be willing to open a pull request for this
