@@ -8,6 +8,7 @@ VERSION_PKG := github.com/tanvir001728/hookyard/internal/version
 LDFLAGS   := -s -w -X $(VERSION_PKG).Version=$(VERSION) -X $(VERSION_PKG).Commit=$(COMMIT) -X $(VERSION_PKG).Date=$(DATE)
 
 GOLANGCI_LINT ?= golangci-lint
+REDOCLY       ?= npx --yes @redocly/cli@2.55.0
 DEV_COMPOSE   := docker compose -f deploy/docker-compose.dev.yml
 
 .DEFAULT_GOAL := help
@@ -36,6 +37,14 @@ cover: ## Run tests and open a coverage report
 .PHONY: lint
 lint: ## Run golangci-lint
 	$(GOLANGCI_LINT) run ./...
+
+.PHONY: api-lint
+api-lint: ## Lint the OpenAPI specification
+	$(REDOCLY) lint
+
+.PHONY: api-docs
+api-docs: ## Build HTML API reference into ./bin/api.html
+	$(REDOCLY) build-docs api/openapi.yaml -o $(BIN_DIR)/api.html
 
 .PHONY: fmt
 fmt: ## Format Go code

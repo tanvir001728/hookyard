@@ -1,0 +1,14 @@
+extends:
+  - recommended-strict
+
+apis:
+  hookyard:
+    root: api/openapi.yaml
+
+rules:
+  operation-4xx-response: error
+  no-unused-components: error
+  tag-description: error
+  info-contact: error
+  # Hookyard is self-hosted, so localhost is the correct default server.
+  no-server-example.com: off
