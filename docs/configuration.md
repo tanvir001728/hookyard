@@ -21,6 +21,36 @@ Hookyard reads two kinds of settings:
 | `HOOKYARD_MAX_BODY_BYTES` | | `1048576` | Maximum API request body size (1 KiB to 64 MiB) |
 | `HOOKYARD_WORKERS` | | `32` | Maximum concurrent deliveries (1 to 1024) |
 | `HOOKYARD_POLL_INTERVAL` | | `1s` | How often the queue is checked when idle. New requests are picked up immediately. |
+| `HOOKYARD_REQUEST_RETENTION` | | `720h` | How long finished requests and their attempts are kept (`0` keeps them forever) |
+| `HOOKYARD_METRICS` | | `false` | Serve Prometheus metrics at `/metrics` |
+
+Hookyard needs **PostgreSQL 14 or newer**.
+
+### Data retention
+
+A background job runs every 10 minutes and deletes:
+
+- finished requests (succeeded, dead, canceled) older than `HOOKYARD_REQUEST_RETENTION`, with their
+  attempts; waiting and in-flight requests are never deleted
+- metric rollups older than 30 days
+- expired dedupe keys
+
+### Prometheus metrics
+
+With `HOOKYARD_METRICS=true`, `/metrics` serves (unauthenticated, so keep it on a private network):
+
+| Metric | Type | Labels |
+| --- | --- | --- |
+| `hookyard_attempts_total` | counter | `upstream` |
+| `hookyard_attempts_failed_total` | counter | `upstream` |
+| `hookyard_requests_succeeded_total` | counter | `upstream` |
+| `hookyard_requests_dead_total` | counter | `upstream` |
+| `hookyard_attempt_duration_seconds` | histogram | `upstream` |
+| `hookyard_queue_waiting` | gauge | `upstream` |
+| `hookyard_dlq_size` | gauge | `upstream` |
+
+The dashboard and `/v1/stats` don't need Prometheus: they read per-minute rollups that Hookyard keeps in
+Postgres.
 
 ### API tokens
 

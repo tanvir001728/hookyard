@@ -38,6 +38,11 @@ type Server struct {
 	Workers int
 	// PollInterval is how often the queue is checked when idle.
 	PollInterval time.Duration
+	// Metrics enables the Prometheus endpoint at /metrics.
+	Metrics bool
+	// RequestRetention is how long finished requests are kept. Zero keeps
+	// them forever.
+	RequestRetention time.Duration
 }
 
 // DefaultMaxBodyBytes is the default limit for API request bodies (1 MiB).
@@ -46,14 +51,15 @@ const DefaultMaxBodyBytes = 1 << 20
 // DefaultServer returns the built-in defaults.
 func DefaultServer() Server {
 	return Server{
-		Addr:            ":8080",
-		LogLevel:        "info",
-		LogFormat:       logging.FormatText,
-		ShutdownTimeout: 30 * time.Second,
-		AutoMigrate:     true,
-		MaxBodyBytes:    DefaultMaxBodyBytes,
-		Workers:         32,
-		PollInterval:    time.Second,
+		Addr:             ":8080",
+		LogLevel:         "info",
+		LogFormat:        logging.FormatText,
+		ShutdownTimeout:  30 * time.Second,
+		AutoMigrate:      true,
+		MaxBodyBytes:     DefaultMaxBodyBytes,
+		Workers:          32,
+		PollInterval:     time.Second,
+		RequestRetention: 30 * 24 * time.Hour,
 	}
 }
 
@@ -115,6 +121,20 @@ func ServerFromEnv(lookup func(string) (string, bool)) (Server, error) {
 		}
 		cfg.PollInterval = d
 	}
+	if v, ok := lookup("HOOKYARD_METRICS"); ok {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return cfg, fmt.Errorf("HOOKYARD_METRICS: %w", err)
+		}
+		cfg.Metrics = b
+	}
+	if v, ok := lookup("HOOKYARD_REQUEST_RETENTION"); ok {
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			return cfg, fmt.Errorf("HOOKYARD_REQUEST_RETENTION: %w", err)
+		}
+		cfg.RequestRetention = d
+	}
 	if v, ok := lookup("HOOKYARD_AUTO_MIGRATE"); ok {
 		b, err := strconv.ParseBool(v)
 		if err != nil {
@@ -159,6 +179,9 @@ func (s Server) ValidateServe() error {
 	}
 	if s.PollInterval < 10*time.Millisecond || s.PollInterval > time.Minute {
 		errs = append(errs, errors.New("poll interval must be between 10ms and 1m (HOOKYARD_POLL_INTERVAL)"))
+	}
+	if s.RequestRetention != 0 && s.RequestRetention < time.Hour {
+		errs = append(errs, errors.New("request retention must be 0 (keep forever) or at least 1h (HOOKYARD_REQUEST_RETENTION)"))
 	}
 	if s.MaxBodyBytes < 1024 || s.MaxBodyBytes > 64<<20 {
 		errs = append(errs, errors.New("max body size must be between 1 KiB and 64 MiB (HOOKYARD_MAX_BODY_BYTES)"))

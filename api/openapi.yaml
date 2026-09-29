@@ -426,7 +426,9 @@ paths:
           schema: { type: string, format: date-time }
         - name: step
           in: query
-          description: Bucket size. Rounded up to a supported resolution (1 minute or 1 hour).
+          description: |
+            Bucket size, rounded up to whole minutes. Buckets start at `from` (rounded down to the
+            minute). A range may have at most 1500 buckets.
           schema:
             $ref: "#/components/schemas/Duration"
             default: 1m

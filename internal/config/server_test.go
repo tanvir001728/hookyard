@@ -28,16 +28,18 @@ func TestServerFromEnvDefaults(t *testing.T) {
 
 func TestServerFromEnvOverrides(t *testing.T) {
 	cfg, err := ServerFromEnv(env(map[string]string{
-		"HOOKYARD_ADDR":             "127.0.0.1:9000",
-		"HOOKYARD_LOG_LEVEL":        "debug",
-		"HOOKYARD_LOG_FORMAT":       "JSON",
-		"HOOKYARD_SHUTDOWN_TIMEOUT": "5s",
-		"HOOKYARD_DATABASE_URL":     "postgres://localhost/hookyard",
-		"HOOKYARD_AUTO_MIGRATE":     "false",
-		"HOOKYARD_CONFIG":           "/etc/hookyard.yaml",
-		"HOOKYARD_MAX_BODY_BYTES":   "2048",
-		"HOOKYARD_WORKERS":          "8",
-		"HOOKYARD_POLL_INTERVAL":    "250ms",
+		"HOOKYARD_ADDR":              "127.0.0.1:9000",
+		"HOOKYARD_LOG_LEVEL":         "debug",
+		"HOOKYARD_LOG_FORMAT":        "JSON",
+		"HOOKYARD_SHUTDOWN_TIMEOUT":  "5s",
+		"HOOKYARD_DATABASE_URL":      "postgres://localhost/hookyard",
+		"HOOKYARD_AUTO_MIGRATE":      "false",
+		"HOOKYARD_CONFIG":            "/etc/hookyard.yaml",
+		"HOOKYARD_MAX_BODY_BYTES":    "2048",
+		"HOOKYARD_WORKERS":           "8",
+		"HOOKYARD_POLL_INTERVAL":     "250ms",
+		"HOOKYARD_METRICS":           "true",
+		"HOOKYARD_REQUEST_RETENTION": "168h",
 	}))
 	if err != nil {
 		t.Fatal(err)
@@ -46,6 +48,7 @@ func TestServerFromEnvOverrides(t *testing.T) {
 		Addr: "127.0.0.1:9000", LogLevel: "debug", LogFormat: logging.FormatJSON, ShutdownTimeout: 5 * time.Second,
 		DatabaseURL: "postgres://localhost/hookyard", AutoMigrate: false, ConfigFile: "/etc/hookyard.yaml",
 		MaxBodyBytes: 2048, Workers: 8, PollInterval: 250 * time.Millisecond,
+		Metrics: true, RequestRetention: 168 * time.Hour,
 	}
 	if !reflect.DeepEqual(cfg, want) {
 		t.Errorf("got %+v, want %+v", cfg, want)
