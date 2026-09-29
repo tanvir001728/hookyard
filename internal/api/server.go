@@ -2,12 +2,15 @@
 package api
 
 import (
-	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"runtime/debug"
 	"time"
+
+	"github.com/tanvir001728/hookyard/internal/config"
+	"github.com/tanvir001728/hookyard/internal/store"
 )
 
 // Server is the root HTTP handler for Hookyard.
@@ -15,6 +18,20 @@ type Server struct {
 	log    *slog.Logger
 	mux    *http.ServeMux
 	checks map[string]ReadinessCheck
+	v1     *V1
+}
+
+// V1 holds the dependencies of the /v1 API.
+type V1 struct {
+	Store   *store.Store
+	Config  *config.File
+	Tokens  []config.APIToken
+	MaxBody int64
+}
+
+// WithV1 enables the /v1 API.
+func WithV1(v1 V1) Option {
+	return func(s *Server) { s.v1 = &v1 }
 }
 
 // Option configures a Server.
@@ -42,6 +59,17 @@ func New(log *slog.Logger, opts ...Option) *Server {
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /healthz", s.handleHealthz)
 	s.mux.HandleFunc("GET /readyz", s.handleReadyz)
+
+	if s.v1 != nil {
+		v1 := func(pattern string, h http.HandlerFunc) {
+			s.mux.Handle(pattern, s.requireToken(h))
+		}
+		v1("POST /v1/requests", s.handleCreateRequest)
+	}
+	// Unmatched /v1 routes get a JSON 404 instead of the default text page.
+	s.mux.HandleFunc("/v1/", func(w http.ResponseWriter, r *http.Request) {
+		writeError(w, http.StatusNotFound, codeNotFound, fmt.Sprintf("no route for %s %s", r.Method, r.URL.Path))
+	})
 }
 
 // ServeHTTP implements http.Handler.
@@ -77,7 +105,7 @@ func (s *Server) withRecover(next http.Handler) http.Handler {
 					panic(v)
 				}
 				s.log.Error("panic serving request", "panic", v, "path", r.URL.Path, "stack", string(debug.Stack()))
-				writeError(w, http.StatusInternalServerError, "internal", "internal server error")
+				writeError(w, http.StatusInternalServerError, codeInternal, "internal server error")
 			}
 		}()
 		next.ServeHTTP(w, r)
@@ -96,22 +124,3 @@ func (r *statusRecorder) WriteHeader(code int) {
 
 // Unwrap lets http.ResponseController reach the underlying writer.
 func (r *statusRecorder) Unwrap() http.ResponseWriter { return r.ResponseWriter }
-
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
-}
-
-type errorBody struct {
-	Error errorDetail `json:"error"`
-}
-
-type errorDetail struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
-}
-
-func writeError(w http.ResponseWriter, status int, code, message string) {
-	writeJSON(w, status, errorBody{Error: errorDetail{Code: code, Message: message}})
-}

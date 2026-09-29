@@ -76,7 +76,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 }
 
 // loadConfig reads settings from the environment, then applies flags shared
-// by all commands plus any command-specific flags registered by extra.
+// by all commands plus any command-specific flags registered by extra. The
+// result is checked with Validate; serve additionally calls ValidateServe.
 func loadConfig(name string, args []string, stderr io.Writer, extra func(*flag.FlagSet, *config.Server)) (config.Server, *flag.FlagSet, error) {
 	cfg, err := config.ServerFromEnv(nil)
 	if err != nil {
@@ -119,6 +120,9 @@ func serve(ctx context.Context, args []string, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
+	if err := cfg.ValidateServe(); err != nil {
+		return fmt.Errorf("invalid configuration: %w", err)
+	}
 
 	log, err := logging.New(stderr, cfg.LogFormat, cfg.LogLevel)
 	if err != nil {
@@ -148,8 +152,11 @@ func serve(ctx context.Context, args []string, stderr io.Writer) error {
 	}
 
 	srv := &http.Server{
-		Addr:              cfg.Addr,
-		Handler:           api.New(log, api.WithReadinessCheck("database", db.Ping)),
+		Addr: cfg.Addr,
+		Handler: api.New(log,
+			api.WithReadinessCheck("database", db.Ping),
+			api.WithV1(api.V1{Store: db, Config: file, Tokens: cfg.APITokens, MaxBody: cfg.MaxBodyBytes}),
+		),
 		ReadHeaderTimeout: 10 * time.Second,
 		BaseContext:       func(net.Listener) context.Context { return ctx },
 	}

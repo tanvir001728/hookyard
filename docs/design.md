@@ -60,7 +60,9 @@ Authorization: Bearer <token>
 The outcome is reported through a signed callback, or by polling `GET /v1/requests/{id}`. The full
 contract lives in [`api/openapi.yaml`](../api/openapi.yaml).
 
-**Configuration precedence:** request options > upstream configuration > global defaults.
+**Configuration precedence:** request options > upstream configuration > global defaults. The one
+exception is headers: headers configured on the upstream (usually credentials) win over request
+headers, so applications can't override them.
 
 ## Request lifecycle
 
