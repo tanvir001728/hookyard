@@ -124,6 +124,10 @@ func TestCreateScheduledRequest(t *testing.T) {
 	if req.NextAttemptAt == nil || !req.NextAttemptAt.Equal(future) {
 		t.Errorf("next_attempt_at = %v, want %v", req.NextAttemptAt, future)
 	}
+	// max_age counts from when the request becomes due, not from creation.
+	if !req.RetryWindowStart.Equal(future) {
+		t.Errorf("retry_window_start = %v, want deliver_at %v", req.RetryWindowStart, future)
+	}
 
 	past := time.Now().Add(-time.Hour)
 	req, _, err = s.CreateRequest(t.Context(), newRequest(func(in *store.NewRequest) { in.DeliverAt = &past }))
@@ -132,6 +136,9 @@ func TestCreateScheduledRequest(t *testing.T) {
 	}
 	if req.Status != model.StatusPending {
 		t.Errorf("deliver_at in the past: status = %s, want pending", req.Status)
+	}
+	if req.RetryWindowStart.Before(req.CreatedAt) {
+		t.Errorf("retry_window_start %v is before creation %v", req.RetryWindowStart, req.CreatedAt)
 	}
 }
 

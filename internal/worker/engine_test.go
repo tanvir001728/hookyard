@@ -202,6 +202,69 @@ func TestDeadAfterMaxAttempts(t *testing.T) {
 	}
 }
 
+func TestPermanentFailureIsNotRetried(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.start(Config{})
+
+	req := h.enqueue("/orders?status=422")
+	dead := h.waitStatus(req.ID, model.StatusDead)
+	attempts := h.attempts(req.ID)
+	if dead.AttemptCount != 1 || len(attempts) != 1 || attempts[0].Outcome != model.OutcomePermanentFailure {
+		t.Errorf("a 422 must go to the DLQ after one attempt: %+v %+v", dead, attempts)
+	}
+}
+
+func TestRetryAfterIsHonored(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.start(Config{})
+
+	req := h.enqueue("/orders?fail_first=1&retry_after=1")
+	h.waitStatus(req.ID, model.StatusSucceeded)
+	got := h.vendor.Requests()
+	if len(got) != 2 {
+		t.Fatalf("vendor received %d requests", len(got))
+	}
+	// Without Retry-After the fast policy would retry within 50ms.
+	if gap := got[1].At.Sub(got[0].At); gap < 950*time.Millisecond {
+		t.Errorf("retried after %s, want at least the 1s Retry-After", gap)
+	}
+}
+
+func TestMaxAgeExceeded(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.start(Config{})
+
+	req := h.enqueue("/orders?status=503", func(in *store.NewRequest) {
+		in.Retry = model.RetryPolicy{MaxAttempts: 100, InitialInterval: 20 * time.Millisecond, MaxInterval: 50 * time.Millisecond, Multiplier: 2, MaxAge: 300 * time.Millisecond}
+	})
+	dead := h.waitStatus(req.ID, model.StatusDead)
+	if dead.LastError == nil || dead.LastError.Code != ErrCodeMaxAgeExceeded || dead.AttemptCount >= 100 {
+		t.Errorf("want dead by max_age before max_attempts: %+v (last error %+v)", dead.AttemptCount, dead.LastError)
+	}
+	// The attempt itself keeps its real error.
+	attempts := h.attempts(req.ID)
+	if last := attempts[len(attempts)-1]; last.Error == nil || last.Error.Code != ErrCodeHTTPStatus {
+		t.Errorf("last attempt error = %+v", last.Error)
+	}
+}
+
+func TestRetriesRunOnTime(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	// A long poll interval: retries must still run on time.
+	h.start(Config{PollInterval: 10 * time.Second})
+
+	req := h.enqueue("/orders?fail_first=2")
+	start := time.Now()
+	h.waitStatus(req.ID, model.StatusSucceeded)
+	if took := time.Since(start); took > 2*time.Second {
+		t.Errorf("3 attempts with ~50ms backoff took %s; the engine should wake when retries are due", took)
+	}
+}
+
 func TestStringBodySentVerbatim(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)

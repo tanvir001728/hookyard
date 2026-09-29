@@ -76,6 +76,7 @@ func (e *Engine) deliver(ctx context.Context, c store.Claim) {
 		Status:         d.Status,
 		NextAttemptAt:  d.RetryAt,
 		LeaseExpiresAt: c.LeaseExpiresAt,
+		LastError:      d.LastError,
 	})
 	switch {
 	case errors.Is(err, store.ErrLeaseLost):
@@ -90,6 +91,9 @@ func (e *Engine) deliver(ctx context.Context, c store.Claim) {
 	attrs := []any{"status", d.Status, "http_status", result.StatusCode, "duration", attempt.Duration}
 	if result.Error != nil {
 		attrs = append(attrs, "error", result.Error.Message)
+	}
+	if d.LastError != nil {
+		attrs = append(attrs, "reason", d.LastError.Message)
 	}
 	switch d.Status {
 	case model.StatusSucceeded:
