@@ -15,3 +15,14 @@ updates:
     commit-message:
       prefix: build
     labels: ["type: dependencies"]
+
+  - package-ecosystem: npm
+    directory: /sdk/typescript
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: build
+    labels: ["type: dependencies"]
+    groups:
+      sdk-dev-dependencies:
+        dependency-type: development

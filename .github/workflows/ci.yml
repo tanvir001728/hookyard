@@ -65,3 +65,86 @@ jobs:
         run: make build
       - name: Smoke test
         run: ./bin/hookyard version
+
+  sdk:
+    name: SDK
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdk/typescript
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: hookyard
+          POSTGRES_PASSWORD: hookyard
+          POSTGRES_DB: hookyard
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U hookyard -d hookyard"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: sdk/typescript/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: sdk/typescript/pnpm-lock.yaml
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Check generated types are up to date
+        run: pnpm check:generated
+      - name: Typecheck
+        run: pnpm typecheck
+      - name: Unit tests
+        run: pnpm test
+      - name: Build
+        run: pnpm build
+      - name: Build Hookyard and flakyvendor
+        working-directory: .
+        run: make build
+      - name: Start Hookyard
+        working-directory: .
+        env:
+          HOOKYARD_DATABASE_URL: postgres://hookyard:hookyard@localhost:5432/hookyard?sslmode=disable
+          HOOKYARD_API_TOKENS: ci:hookyard-ci-token
+          HOOKYARD_CONFIG: ${{ runner.temp }}/hookyard.yaml
+          HOOKYARD_ADDR: 127.0.0.1:8080
+        run: |
+          cat > "$HOOKYARD_CONFIG" <<'EOF'
+          upstreams:
+            flaky:
+              base_url: http://127.0.0.1:9090
+              retry:
+                preset: quick
+                max_attempts: 2
+                initial_interval: 100ms
+          EOF
+          ./bin/flakyvendor -addr 127.0.0.1:9090 > "$RUNNER_TEMP/flakyvendor.log" 2>&1 &
+          ./bin/hookyard serve > "$RUNNER_TEMP/hookyard.log" 2>&1 &
+          for _ in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8080/readyz; then exit 0; fi
+            sleep 1
+          done
+          echo "::error::Hookyard did not become ready"
+          cat "$RUNNER_TEMP/hookyard.log"
+          exit 1
+      - name: Contract tests
+        env:
+          HOOKYARD_URL: http://127.0.0.1:8080
+          HOOKYARD_TOKEN: hookyard-ci-token
+          HOOKYARD_CONTRACT_REQUIRED: "1"
+        run: pnpm test:contract
+      - name: Server logs
+        if: failure()
+        working-directory: .
+        run: cat "$RUNNER_TEMP/hookyard.log" "$RUNNER_TEMP/flakyvendor.log" || true

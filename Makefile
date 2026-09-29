@@ -13,6 +13,7 @@ DEV_COMPOSE   := docker compose -f deploy/docker-compose.dev.yml
 DEV_DB_PORT   ?= $(or $(HOOKYARD_DEV_DB_PORT),5432)
 DEV_TOKEN     ?= hookyard-dev-token
 DEV_DB_URL    ?= postgres://hookyard:hookyard@localhost:$(DEV_DB_PORT)/hookyard?sslmode=disable
+SDK_DIR       := sdk/typescript
 
 .DEFAULT_GOAL := help
 
@@ -64,6 +65,18 @@ fmt: ## Format Go code
 tidy: ## Tidy go.mod and go.sum
 	go mod tidy
 
+.PHONY: sdk-install
+sdk-install: ## Install the TypeScript SDK's dependencies
+	cd $(SDK_DIR) && pnpm install --frozen-lockfile
+
+.PHONY: sdk-test
+sdk-test: ## Check generated types, typecheck and unit test the TypeScript SDK
+	cd $(SDK_DIR) && pnpm check:generated && pnpm typecheck && pnpm test
+
+.PHONY: sdk-build
+sdk-build: ## Build the TypeScript SDK into sdk/typescript/dist
+	cd $(SDK_DIR) && pnpm build
+
 .PHONY: dev-db
 dev-db: ## Start a local Postgres for development
 	$(DEV_COMPOSE) up -d --wait
@@ -74,4 +87,4 @@ dev-db-down: ## Stop the local Postgres (keeps data)
 
 .PHONY: clean
 clean: ## Remove build artifacts
-	rm -rf $(BIN_DIR) coverage.out
+	rm -rf $(BIN_DIR) coverage.out $(SDK_DIR)/dist
