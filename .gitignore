@@ -34,3 +34,6 @@ hookyard.local.yaml
 !.vscode/extensions.json
 *.swp
 .DS_Store
+
+# Local Hookyard config used for development
+/hookyard.yaml

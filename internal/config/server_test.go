@@ -33,13 +33,14 @@ func TestServerFromEnvOverrides(t *testing.T) {
 		"HOOKYARD_SHUTDOWN_TIMEOUT": "5s",
 		"HOOKYARD_DATABASE_URL":     "postgres://localhost/hookyard",
 		"HOOKYARD_AUTO_MIGRATE":     "false",
+		"HOOKYARD_CONFIG":           "/etc/hookyard.yaml",
 	}))
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := Server{
 		Addr: "127.0.0.1:9000", LogLevel: "debug", LogFormat: logging.FormatJSON, ShutdownTimeout: 5 * time.Second,
-		DatabaseURL: "postgres://localhost/hookyard", AutoMigrate: false,
+		DatabaseURL: "postgres://localhost/hookyard", AutoMigrate: false, ConfigFile: "/etc/hookyard.yaml",
 	}
 	if cfg != want {
 		t.Errorf("got %+v, want %+v", cfg, want)
