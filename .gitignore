@@ -1,0 +1,36 @@
+# Build output
+/bin/
+/dist/
+*.exe
+*.test
+*.out
+coverage.*
+
+# Go
+/vendor/
+go.work
+go.work.sum
+
+# Node / web
+node_modules/
+.pnpm-store/
+web/dist/
+sdk/typescript/dist/
+*.tsbuildinfo
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Local config overrides
+hookyard.local.yaml
+
+# Editors and OS
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+.DS_Store
