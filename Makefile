@@ -10,6 +10,8 @@ LDFLAGS   := -s -w -X $(VERSION_PKG).Version=$(VERSION) -X $(VERSION_PKG).Commit
 GOLANGCI_LINT ?= golangci-lint
 REDOCLY       ?= npx --yes @redocly/cli@2.55.0
 DEV_COMPOSE   := docker compose -f deploy/docker-compose.dev.yml
+DEV_DB_PORT   ?= $(or $(HOOKYARD_DEV_DB_PORT),5432)
+DEV_DB_URL    ?= postgres://hookyard:hookyard@localhost:$(DEV_DB_PORT)/hookyard?sslmode=disable
 
 .DEFAULT_GOAL := help
 
@@ -22,8 +24,8 @@ build: ## Build the hookyard binary into ./bin
 	go build -trimpath -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/hookyard ./cmd/hookyard
 
 .PHONY: run
-run: build ## Build and run the server
-	./$(BIN_DIR)/hookyard serve
+run: build ## Build and run the server against the dev database (make dev-db)
+	HOOKYARD_DATABASE_URL="$${HOOKYARD_DATABASE_URL:-$(DEV_DB_URL)}" ./$(BIN_DIR)/hookyard serve
 
 .PHONY: test
 test: ## Run tests with the race detector

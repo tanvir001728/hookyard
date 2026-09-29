@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -22,6 +23,10 @@ type Server struct {
 	LogFormat logging.Format
 	// ShutdownTimeout bounds how long graceful shutdown may take.
 	ShutdownTimeout time.Duration
+	// DatabaseURL is the Postgres connection string.
+	DatabaseURL string
+	// AutoMigrate applies pending database migrations on startup.
+	AutoMigrate bool
 }
 
 // DefaultServer returns the built-in defaults.
@@ -31,11 +36,13 @@ func DefaultServer() Server {
 		LogLevel:        "info",
 		LogFormat:       logging.FormatText,
 		ShutdownTimeout: 30 * time.Second,
+		AutoMigrate:     true,
 	}
 }
 
-// ServerFromEnv returns the defaults overridden by environment variables.
-// lookup is usually os.LookupEnv; it is injectable for tests.
+// ServerFromEnv returns the defaults overridden by environment variables. It
+// does not validate the result, so flags can still fill in missing values;
+// call Validate afterwards. lookup is usually os.LookupEnv.
 func ServerFromEnv(lookup func(string) (string, bool)) (Server, error) {
 	if lookup == nil {
 		lookup = os.LookupEnv
@@ -57,7 +64,17 @@ func ServerFromEnv(lookup func(string) (string, bool)) (Server, error) {
 		}
 		cfg.ShutdownTimeout = d
 	}
-	return cfg, cfg.Validate()
+	if v, ok := lookup("HOOKYARD_DATABASE_URL"); ok {
+		cfg.DatabaseURL = v
+	}
+	if v, ok := lookup("HOOKYARD_AUTO_MIGRATE"); ok {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return cfg, fmt.Errorf("HOOKYARD_AUTO_MIGRATE: %w", err)
+		}
+		cfg.AutoMigrate = b
+	}
+	return cfg, nil
 }
 
 // Validate reports every invalid setting at once.
@@ -74,6 +91,9 @@ func (s Server) Validate() error {
 	}
 	if s.ShutdownTimeout <= 0 {
 		errs = append(errs, errors.New("shutdown timeout must be positive"))
+	}
+	if strings.TrimSpace(s.DatabaseURL) == "" {
+		errs = append(errs, errors.New("database url is required: set HOOKYARD_DATABASE_URL, for example postgres://user:pass@localhost:5432/hookyard"))
 	}
 	return errors.Join(errs...)
 }

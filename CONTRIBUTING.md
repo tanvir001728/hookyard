@@ -45,6 +45,23 @@ make lint test   # what CI runs
 Linting uses [golangci-lint v2](https://golangci-lint.run/welcome/install/). Install it, or point
 `GOLANGCI_LINT` at your binary.
 
+### Database tests
+
+Tests that touch Postgres start a throwaway container with
+[testcontainers](https://golang.testcontainers.org/), so **Docker must be running**. Each test gets its
+own freshly migrated database, so tests can run in parallel.
+
+- To use an existing server instead, set `HOOKYARD_TEST_DATABASE_URL` (the user must be allowed to
+  create databases).
+- To skip database tests entirely, run `go test -short ./...`.
+
+### Database migrations
+
+Migrations live in `internal/store/migrations` and are embedded into the binary. Add a new numbered
+file (for example `00002_add_callbacks.sql`) with `-- +goose Up` and `-- +goose Down` sections, and
+never edit a migration that has already been released. `hookyard serve` applies pending migrations on
+startup unless `HOOKYARD_AUTO_MIGRATE=false`; `hookyard migrate status` shows what is applied.
+
 ## Pull request process
 
 1. Fork the repository and create a branch from `main`:
