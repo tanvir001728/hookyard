@@ -111,6 +111,9 @@ type Request struct {
 	// RetryWindowStart anchors Retry.MaxAge: when the request first became
 	// due, or when it was last replayed.
 	RetryWindowStart time.Time
+	// RetryAttemptBase is AttemptCount at the last replay. Retry.MaxAttempts
+	// applies to attempts made after it.
+	RetryAttemptBase int
 	LastError        *DeliveryError
 	LastStatusCode   *int
 

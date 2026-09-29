@@ -34,7 +34,7 @@ type NewRequest struct {
 
 const requestColumns = `id, upstream, method, path, headers, body, dedupe_key, status, attempt_count,
 	retry, timeout_ms, tags, deliver_at, next_attempt_at, last_error_code, last_error_message,
-	last_status_code, created_at, updated_at, completed_at, retry_window_start`
+	last_status_code, created_at, updated_at, completed_at, retry_window_start, retry_attempt_base`
 
 // CreateRequest stores a new request. If in.DedupeKey matches a live key for the
 // same upstream, no request is created: the existing one is returned and created
@@ -295,6 +295,7 @@ func scanRequest(row pgx.Row, extra ...any) (model.Request, error) {
 		&r.ID, &r.Upstream, &r.Method, &r.Path, &headers, &body, &dedupeKey, &status,
 		&r.AttemptCount, &retry, &timeoutMS, &tags, &r.DeliverAt, &r.NextAttemptAt, &errCode, &errMsg,
 		&r.LastStatusCode, &r.CreatedAt, &r.UpdatedAt, &r.CompletedAt, &r.RetryWindowStart,
+		&r.RetryAttemptBase,
 	}
 	err := row.Scan(append(dest, extra...)...)
 	if err != nil {

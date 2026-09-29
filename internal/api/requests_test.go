@@ -23,6 +23,8 @@ upstreams:
     timeout: 15s
     retry: patient
     dedupe_window: 1h
+    headers:
+      Authorization: "Bearer secret-never-exposed"
   payments-y:
     base_url: https://payments.example
 `

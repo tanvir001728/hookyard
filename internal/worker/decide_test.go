@@ -41,6 +41,12 @@ func TestPolicyDecider(t *testing.T) {
 		{"400 is permanent", req, 1, httpErr(400), model.StatusDead, model.OutcomePermanentFailure, 0, ""},
 		{"redirect is permanent", req, 1, httpErr(302), model.StatusDead, model.OutcomePermanentFailure, 0, ""},
 		{"max attempts", req, 5, httpErr(503), model.StatusDead, model.OutcomeRetryableFailure, 0, ""},
+		{
+			"replay grants a fresh budget",
+			model.Request{Retry: policy, RetryWindowStart: now, RetryAttemptBase: 5},
+			7, httpErr(503), model.StatusFailed, model.OutcomeRetryableFailure, time.Second, // 2nd attempt since replay: half of 2s
+			"",
+		},
 		{"Retry-After beyond max_age", req, 1, httpErr(503, "Retry-After", "7200"), model.StatusDead, model.OutcomeRetryableFailure, 0, ErrCodeMaxAgeExceeded},
 		{
 			"window nearly used up",

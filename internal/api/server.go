@@ -68,6 +68,15 @@ func (s *Server) routes() {
 			s.mux.Handle(pattern, s.requireToken(h))
 		}
 		v1("POST /v1/requests", s.handleCreateRequest)
+		v1("GET /v1/requests", s.handleListRequests)
+		v1("GET /v1/requests/{id}", s.handleGetRequest)
+		v1("GET /v1/requests/{id}/attempts", s.handleListAttempts)
+		v1("POST /v1/requests/{id}/replay", s.handleReplayRequest)
+		v1("POST /v1/requests/{id}/cancel", s.handleCancelRequest)
+		v1("GET /v1/dlq", s.handleDLQSummary)
+		v1("POST /v1/dlq/replay", s.handleDLQReplay)
+		v1("GET /v1/upstreams", s.handleListUpstreams)
+		v1("GET /v1/upstreams/{name}", s.handleGetUpstream)
 	}
 	// Unmatched /v1 routes get a JSON 404 instead of the default text page.
 	s.mux.HandleFunc("/v1/", func(w http.ResponseWriter, r *http.Request) {
