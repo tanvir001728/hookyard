@@ -10,3 +10,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Project documentation, community guidelines and contribution templates.
+- `hookyard serve` with `/healthz` and `/readyz` endpoints, structured logging and graceful shutdown.
