@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- TypeScript SDK `@hookyard/sdk` (`sdk/typescript`): `hy.to(upstream).post(...)` with typed options, `job.result()`, the full management API, typed errors, transport retries that never create duplicates, and an in-memory fake in `@hookyard/sdk/testing`. Zero runtime dependencies; wire types are generated from the OpenAPI spec and contract-tested against a live server in CI.
 - Project documentation, community guidelines and contribution templates.
 - `hookyard serve` with `/healthz` and `/readyz` endpoints, structured logging and graceful shutdown.
 - Delivery metrics: per-upstream per-minute rollups in Postgres (safe with several instances), `GET /v1/stats/overview` (success rate, throughput, p50/p95/p99 latency, queue depth, oldest pending age, DLQ size) and `GET /v1/stats/timeseries`; optional Prometheus endpoint (`HOOKYARD_METRICS`); retention of finished requests (`HOOKYARD_REQUEST_RETENTION`), old rollups and expired dedupe keys.

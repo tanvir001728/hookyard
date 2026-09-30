@@ -72,8 +72,9 @@ Hookyard moves all of that into a single self-hosted service. Your application c
 ## A quick look
 
 > [!NOTE]
-> This is the **planned** TypeScript SDK API, shown here to explain the developer experience we're
-> building toward.
+> These examples use the TypeScript SDK, [`@hookyard/sdk`](sdk/typescript#readme). A few options shown
+> here, such as `orderingKey`, relative DLQ filters (`since`) and pausing upstreams, are planned for
+> later milestones; the [SDK README](sdk/typescript#readme) documents what is available today.
 
 **Start with three lines.** Retries, dead-lettering and circuit breaking are on by default:
 
