@@ -100,7 +100,7 @@ function UpstreamCard({ stats, upstream, rangeLabel }: { stats: UpstreamStats; u
             View requests
           </Link>
           {stats.dlq_size > 0 && (
-            <Link to="/requests" search={{ upstream: stats.upstream, status: "dead" }} className="text-primary hover:underline">
+            <Link to="/dlq" className="text-primary hover:underline">
               View dead letters
             </Link>
           )}

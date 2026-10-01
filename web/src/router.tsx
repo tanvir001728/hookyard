@@ -1,5 +1,6 @@
 import { createRootRoute, createRoute, createRouter, Outlet } from "@tanstack/react-router";
 import { AppShell } from "@/components/layout/app-shell";
+import { DLQPage } from "@/pages/dlq";
 import { NotFoundPage } from "@/pages/not-found";
 import { OverviewPage, ranges, type RangeKey } from "@/pages/overview";
 import { RequestDetailPage } from "@/pages/request-detail";
@@ -31,7 +32,9 @@ const requestsRoute = createRoute({
 
 const requestDetailRoute = createRoute({ getParentRoute: () => rootRoute, path: "/requests/$id", component: RequestDetailPage });
 
-const routeTree = rootRoute.addChildren([overviewRoute, requestsRoute, requestDetailRoute]);
+const dlqRoute = createRoute({ getParentRoute: () => rootRoute, path: "/dlq", component: DLQPage });
+
+const routeTree = rootRoute.addChildren([overviewRoute, requestsRoute, requestDetailRoute, dlqRoute]);
 
 export const router = createRouter({ routeTree, defaultPreload: "intent" });
 
