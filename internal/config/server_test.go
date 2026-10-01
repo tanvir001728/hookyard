@@ -40,6 +40,7 @@ func TestServerFromEnvOverrides(t *testing.T) {
 		"HOOKYARD_POLL_INTERVAL":     "250ms",
 		"HOOKYARD_METRICS":           "true",
 		"HOOKYARD_REQUEST_RETENTION": "168h",
+		"HOOKYARD_DASHBOARD":         "false",
 	}))
 	if err != nil {
 		t.Fatal(err)
@@ -48,7 +49,7 @@ func TestServerFromEnvOverrides(t *testing.T) {
 		Addr: "127.0.0.1:9000", LogLevel: "debug", LogFormat: logging.FormatJSON, ShutdownTimeout: 5 * time.Second,
 		DatabaseURL: "postgres://localhost/hookyard", AutoMigrate: false, ConfigFile: "/etc/hookyard.yaml",
 		MaxBodyBytes: 2048, Workers: 8, PollInterval: 250 * time.Millisecond,
-		Metrics: true, RequestRetention: 168 * time.Hour,
+		Metrics: true, RequestRetention: 168 * time.Hour, Dashboard: false,
 	}
 	if !reflect.DeepEqual(cfg, want) {
 		t.Errorf("got %+v, want %+v", cfg, want)

@@ -25,6 +25,7 @@ import (
 	"github.com/tanvir001728/hookyard/internal/store"
 	"github.com/tanvir001728/hookyard/internal/version"
 	"github.com/tanvir001728/hookyard/internal/worker"
+	"github.com/tanvir001728/hookyard/web"
 )
 
 const usage = `Hookyard: reliable delivery for outbound API calls.
@@ -182,6 +183,9 @@ func serve(ctx context.Context, args []string, stderr io.Writer) error {
 	}
 	if cfg.Metrics {
 		apiOpts = append(apiOpts, api.WithMetrics(collector.MetricsHandler(queueGauges(db))))
+	}
+	if cfg.Dashboard {
+		apiOpts = append(apiOpts, api.WithDashboard(web.Handler()))
 	}
 
 	srv := &http.Server{
