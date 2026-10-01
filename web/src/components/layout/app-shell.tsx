@@ -1,7 +1,8 @@
 import { useState, type ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
-import { LayoutDashboard, List, LogOut, Menu, Moon, Sun, X, type LucideIcon } from "lucide-react";
+import { LayoutDashboard, List, LogOut, Menu, Skull, Moon, Sun, X, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useDLQSummary } from "@/lib/dlq";
 import { useSession, useSignOut } from "@/lib/session";
 import { useTheme } from "@/lib/theme";
 import { cn } from "@/lib/utils";
@@ -12,18 +13,32 @@ interface NavItem {
   label: string;
   icon: LucideIcon;
   exact?: boolean;
+  /** Shows the dead-letter count next to the label. */
+  dlqCount?: boolean;
 }
 
 export const navItems: NavItem[] = [
   { to: "/", label: "Overview", icon: LayoutDashboard, exact: true },
   { to: "/requests", label: "Requests", icon: List },
+  { to: "/dlq", label: "Dead letters", icon: Skull, dlqCount: true },
 ];
+
+function DLQCount() {
+  const summary = useDLQSummary(undefined, 30_000);
+  const total = summary.data?.total ?? 0;
+  if (total === 0) return null;
+  return (
+    <span className="ml-auto rounded-full bg-red-500/10 px-1.5 text-xs font-medium text-red-700 tabular-nums dark:text-red-400" aria-label={`${total} dead letters`}>
+      {total > 999 ? "999+" : total}
+    </span>
+  );
+}
 
 
 function Nav({ onNavigate }: { onNavigate?: () => void }) {
   return (
     <nav className="flex flex-col gap-0.5" aria-label="Main">
-      {navItems.map(({ to, label, icon: Icon, exact }) => (
+      {navItems.map(({ to, label, icon: Icon, exact, dlqCount }) => (
         <Link
           key={to}
           to={to}
@@ -34,6 +49,7 @@ function Nav({ onNavigate }: { onNavigate?: () => void }) {
         >
           <Icon className="size-4" aria-hidden />
           {label}
+          {dlqCount && <DLQCount />}
         </Link>
       ))}
     </nav>

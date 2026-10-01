@@ -124,3 +124,65 @@ test.describe("requests", () => {
     await expect(page.getByText("Request not found")).toBeVisible();
   });
 });
+
+test.describe("dead letters", () => {
+  // Each project gets its own failure code, so its DLQ group isn't changed by
+  // the other project's replays running at the same time.
+  const statusFor = (project: string) => (project === "mobile" ? 410 : 422);
+
+  test.beforeEach(async ({ request }, testInfo) => {
+    // 4xx is a permanent failure, so these go straight to the DLQ.
+    for (let i = 0; i < 2; i++) {
+      const res = await request.post("/v1/requests", {
+        headers: { Authorization: `Bearer ${token}` },
+        data: { upstream: "payments-y", method: "POST", path: `/e2e-dead?status=${statusFor(testInfo.project.name)}` },
+      });
+      expect(res.status()).toBe(202);
+    }
+  });
+
+  test("replaying a group confirms the exact count first", async ({ page, request }, testInfo) => {
+    const status = statusFor(testInfo.project.name);
+    await signIn(page);
+    await page.goto("/dlq");
+    const row = page.getByRole("row", { name: new RegExp(`payments-y.*HTTP ${status}`) });
+    await expect(row).toBeVisible();
+    const count = Number(await row.getByRole("cell").nth(2).innerText());
+    expect(count).toBeGreaterThanOrEqual(2);
+
+    await row.getByRole("button", { name: /Replay/ }).click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toContainText(`${count} dead requests will be delivered again`);
+
+    // Escape cancels without replaying.
+    await page.keyboard.press("Escape");
+    await expect(dialog).toHaveCount(0);
+
+    await row.getByRole("button", { name: /Replay/ }).click();
+    await dialog.getByRole("button", { name: `Replay ${count}` }).click();
+    await expect(dialog.getByRole("status")).toContainText(`Queued ${count}`);
+
+    const summary = await (await request.get("/v1/dlq?upstream=payments-y", { headers: { Authorization: `Bearer ${token}` } })).json();
+    const group = summary.groups.find((g: { status_code: number }) => g.status_code === status);
+    // They are replayed and, since 422 is permanent, they fail again; the
+    // group must not have grown beyond the replayed requests.
+    expect(group?.count ?? 0).toBeLessThanOrEqual(count);
+  });
+
+  test("the navigation shows the dead-letter count", async ({ page, isMobile }) => {
+    await signIn(page);
+    if (isMobile) await page.getByRole("button", { name: "Open menu" }).click();
+    await expect(page.getByLabel(/\d+ dead letters/).last()).toBeVisible();
+  });
+});
+
+test("no page scrolls sideways on a phone", async ({ page, isMobile }) => {
+  test.skip(!isMobile, "phone layout only");
+  await signIn(page);
+  for (const path of ["/", "/requests", "/dlq"]) {
+    await page.goto(path);
+    await page.waitForLoadState("networkidle");
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    expect(overflow, `${path} overflows horizontally`).toBeLessThanOrEqual(0);
+  }
+});
