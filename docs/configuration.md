@@ -21,6 +21,7 @@ Hookyard reads two kinds of settings:
 | `HOOKYARD_MAX_BODY_BYTES` | | `1048576` | Maximum API request body size (1 KiB to 64 MiB) |
 | `HOOKYARD_WORKERS` | | `32` | Maximum concurrent deliveries (1 to 1024) |
 | `HOOKYARD_POLL_INTERVAL` | | `1s` | How often the queue is checked when idle. New requests are picked up immediately. |
+| `HOOKYARD_LEASE_MARGIN` | | `30s` | Advanced: added to a request's timeout to form a worker's lease. If a Hookyard process dies mid-delivery, the request is delivered again after its lease expires. |
 | `HOOKYARD_REQUEST_RETENTION` | | `720h` | How long finished requests and their attempts are kept (`0` keeps them forever) |
 | `HOOKYARD_METRICS` | | `false` | Serve Prometheus metrics at `/metrics` |
 | `HOOKYARD_DASHBOARD` | | `true` | Serve the web dashboard at `/` |

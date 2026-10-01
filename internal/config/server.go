@@ -38,6 +38,9 @@ type Server struct {
 	Workers int
 	// PollInterval is how often the queue is checked when idle.
 	PollInterval time.Duration
+	// LeaseMargin is added to a request's timeout to form a worker's lease;
+	// after it, a crashed worker's request is delivered again.
+	LeaseMargin time.Duration
 	// Metrics enables the Prometheus endpoint at /metrics.
 	Metrics bool
 	// Dashboard serves the web dashboard at /.
@@ -61,6 +64,7 @@ func DefaultServer() Server {
 		MaxBodyBytes:     DefaultMaxBodyBytes,
 		Workers:          32,
 		PollInterval:     time.Second,
+		LeaseMargin:      30 * time.Second,
 		RequestRetention: 30 * 24 * time.Hour,
 		Dashboard:        true,
 	}
@@ -123,6 +127,13 @@ func ServerFromEnv(lookup func(string) (string, bool)) (Server, error) {
 			return cfg, fmt.Errorf("HOOKYARD_POLL_INTERVAL: %w", err)
 		}
 		cfg.PollInterval = d
+	}
+	if v, ok := lookup("HOOKYARD_LEASE_MARGIN"); ok {
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			return cfg, fmt.Errorf("HOOKYARD_LEASE_MARGIN: %w", err)
+		}
+		cfg.LeaseMargin = d
 	}
 	if v, ok := lookup("HOOKYARD_METRICS"); ok {
 		b, err := strconv.ParseBool(v)
@@ -189,6 +200,9 @@ func (s Server) ValidateServe() error {
 	}
 	if s.PollInterval < 10*time.Millisecond || s.PollInterval > time.Minute {
 		errs = append(errs, errors.New("poll interval must be between 10ms and 1m (HOOKYARD_POLL_INTERVAL)"))
+	}
+	if s.LeaseMargin < time.Second || s.LeaseMargin > time.Hour {
+		errs = append(errs, errors.New("lease margin must be between 1s and 1h (HOOKYARD_LEASE_MARGIN)"))
 	}
 	if s.RequestRetention != 0 && s.RequestRetention < time.Hour {
 		errs = append(errs, errors.New("request retention must be 0 (keep forever) or at least 1h (HOOKYARD_REQUEST_RETENTION)"))

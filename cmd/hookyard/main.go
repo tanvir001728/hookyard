@@ -162,6 +162,7 @@ func serve(ctx context.Context, args []string, stderr io.Writer) error {
 	engine := worker.New(log, db, file.Upstreams, worker.Config{
 		Workers:      cfg.Workers,
 		PollInterval: cfg.PollInterval,
+		LeaseMargin:  cfg.LeaseMargin,
 		DrainTimeout: cfg.ShutdownTimeout,
 		Observer:     collector.Observe,
 	})
