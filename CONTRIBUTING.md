@@ -55,6 +55,15 @@ own freshly migrated database, so tests can run in parallel.
   create databases).
 - To skip database tests entirely, run `go test -short ./...`.
 
+### End-to-end tests
+
+- `make e2e` builds the real `hookyard` and `flakyvendor` binaries, runs them as processes and tests
+  them over HTTP, including killing Hookyard mid-delivery and restarting it.
+- `pnpm --dir web e2e` runs the dashboard browser tests (Playwright, desktop and phone) against a
+  running Hookyard. Start one with the upstreams in `e2e/dashboard.yaml`
+  (`HOOKYARD_CONFIG=e2e/dashboard.yaml make run`, plus `make flakyvendor`), and set
+  `HOOKYARD_E2E_URL` if it isn't on `localhost:8080`. Run `pnpm --dir web exec playwright install chromium` once.
+
 ### Database migrations
 
 Migrations live in `internal/store/migrations` and are embedded into the binary. Add a new numbered

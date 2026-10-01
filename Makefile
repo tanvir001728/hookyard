@@ -54,6 +54,10 @@ run: build ## Build and run the server against the dev database (make dev-db)
 test: ## Run tests with the race detector
 	go test -race -count=1 ./...
 
+.PHONY: e2e
+e2e: ## Run the end-to-end suite (real binaries; needs Docker or HOOKYARD_TEST_DATABASE_URL)
+	go test -tags e2e -count=1 -v ./e2e/
+
 .PHONY: cover
 cover: ## Run tests and open a coverage report
 	go test -race -coverprofile=coverage.out ./...

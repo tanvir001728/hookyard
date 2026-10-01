@@ -1,0 +1,9 @@
+# Upstreams for the dashboard browser tests (web/e2e), both on flakyvendor.
+upstreams:
+  courier-x:
+    base_url: http://127.0.0.1:9090
+    timeout: 5s
+    retry: { preset: quick, max_attempts: 3, initial_interval: 200ms }
+  payments-y:
+    base_url: http://127.0.0.1:9090/pay
+    retry: { preset: quick, max_attempts: 2, initial_interval: 200ms }

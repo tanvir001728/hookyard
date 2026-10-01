@@ -100,6 +100,76 @@ jobs:
           # The dashboard must be embedded, not the "not built" placeholder.
           grep -aqF '<div id="root"></div>' bin/hookyard
 
+  e2e:
+    name: E2E
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: hookyard
+          POSTGRES_PASSWORD: hookyard
+          POSTGRES_DB: hookyard
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U hookyard -d hookyard"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 15
+    env:
+      HOOKYARD_TEST_DATABASE_URL: postgres://hookyard:hookyard@localhost:5432/hookyard?sslmode=disable
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - name: Server end-to-end tests (real binaries, crash and restart)
+        run: go test -tags e2e -count=1 -v ./e2e/
+      - name: Build Hookyard with the dashboard
+        run: make web build
+      - name: Start Hookyard for the browser tests
+        env:
+          HOOKYARD_DATABASE_URL: postgres://hookyard:hookyard@localhost:5432/hookyard?sslmode=disable
+          HOOKYARD_API_TOKENS: dev:hookyard-dev-token
+          HOOKYARD_CONFIG: e2e/dashboard.yaml
+          HOOKYARD_ADDR: 127.0.0.1:8080
+        run: |
+          ./bin/flakyvendor -addr 127.0.0.1:9090 > "$RUNNER_TEMP/flakyvendor.log" 2>&1 &
+          ./bin/hookyard serve > "$RUNNER_TEMP/hookyard.log" 2>&1 &
+          for _ in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8080/readyz; then exit 0; fi
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/hookyard.log"
+          exit 1
+      - name: Install Playwright
+        working-directory: web
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Dashboard browser tests (desktop and mobile)
+        working-directory: web
+        env:
+          HOOKYARD_E2E_URL: http://127.0.0.1:8080
+        run: pnpm e2e
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report
+          path: web/test-results
+          retention-days: 7
+      - name: Hookyard logs
+        if: failure()
+        run: cat "$RUNNER_TEMP/hookyard.log"
+
   docker:
     name: Docker
     runs-on: ubuntu-latest

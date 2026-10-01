@@ -52,29 +52,39 @@ func NewWithURL(t testing.TB) (*store.Store, string) {
 		t.Skip("skipping database test in -short mode")
 	}
 
-	setupOnce.Do(func() { baseURL, template, setupErr = setup() })
-	if setupErr != nil {
-		t.Fatalf("storetest: %v", setupErr)
-	}
-
-	ctx := context.Background()
-	name := "test_" + strings.ToLower(ulid.Make().String())
-	if err := execAdmin(ctx, baseURL, fmt.Sprintf(`CREATE DATABASE %q TEMPLATE %q`, name, template)); err != nil {
-		t.Fatalf("storetest: create database: %v", err)
-	}
-
-	dbURL := withDatabase(baseURL, name)
-	s, err := store.Open(ctx, dbURL, store.Options{MaxConns: 8})
+	dbURL, drop, err := NewDatabase(context.Background())
 	if err != nil {
+		t.Fatalf("storetest: %v", err)
+	}
+	s, err := store.Open(context.Background(), dbURL, store.Options{MaxConns: 8})
+	if err != nil {
+		drop()
 		t.Fatalf("storetest: open: %v", err)
 	}
 	t.Cleanup(func() {
 		s.Close()
-		if err := execAdmin(context.Background(), baseURL, fmt.Sprintf(`DROP DATABASE %q WITH (FORCE)`, name)); err != nil {
-			t.Logf("storetest: drop database %s: %v", name, err)
-		}
+		drop()
 	})
 	return s, dbURL
+}
+
+// NewDatabase creates a fresh, migrated database and returns its URL and a
+// function that drops it. It is for callers without a testing.TB, such as
+// TestMain; close every connection before calling drop.
+func NewDatabase(ctx context.Context) (string, func(), error) {
+	setupOnce.Do(func() { baseURL, template, setupErr = setup() })
+	if setupErr != nil {
+		return "", nil, setupErr
+	}
+
+	name := "test_" + strings.ToLower(ulid.Make().String())
+	if err := execAdmin(ctx, baseURL, fmt.Sprintf(`CREATE DATABASE %q TEMPLATE %q`, name, template)); err != nil {
+		return "", nil, fmt.Errorf("create database: %w", err)
+	}
+	drop := func() {
+		_ = execAdmin(context.Background(), baseURL, fmt.Sprintf(`DROP DATABASE %q WITH (FORCE)`, name))
+	}
+	return withDatabase(baseURL, name), drop, nil
 }
 
 func setup() (string, string, error) {
