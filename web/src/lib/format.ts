@@ -47,3 +47,23 @@ export function formatBucket(iso: string, rangeHours: number): string {
     ? d.toLocaleDateString(undefined, { month: "short", day: "numeric", hour: "numeric" })
     : d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
 }
+
+const relative = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
+
+/** A timestamp relative to now: "5 minutes ago", "in 2 hours". */
+export function formatRelative(iso: string | Date | null | undefined, now = Date.now()): string {
+  if (!iso) return "—";
+  const diff = (new Date(iso).getTime() - now) / 1000;
+  const abs = Math.abs(diff);
+  if (abs < 10) return diff < 0 ? "just now" : "in a few seconds";
+  if (abs < 60) return relative.format(Math.round(diff), "second");
+  if (abs < 3600) return relative.format(Math.round(diff / 60), "minute");
+  if (abs < 86_400) return relative.format(Math.round(diff / 3600), "hour");
+  return relative.format(Math.round(diff / 86_400), "day");
+}
+
+/** A full local timestamp for titles and detail views. */
+export function formatDateTime(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "medium" });
+}

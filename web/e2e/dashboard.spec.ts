@@ -65,3 +65,62 @@ test("the time range is kept in the URL and the chart has a table view", async (
   await expect(page.getByRole("radio", { name: "24h" })).toHaveAttribute("aria-checked", "true");
   if (!isMobile) await expect(page.getByRole("link", { name: "Overview" })).toHaveClass(/font-medium/);
 });
+
+test.describe("requests", () => {
+  test.beforeEach(async ({ request }) => {
+    // A request with a secret header, so redaction can be checked.
+    const res = await request.post("/v1/requests", {
+      headers: { Authorization: `Bearer ${token}` },
+      data: {
+        upstream: "courier-x",
+        method: "POST",
+        path: "/e2e",
+        headers: { Authorization: "Bearer e2e-secret-value", "X-Trace": "t-1" },
+        body: { e2e: true },
+        tags: { suite: "e2e" },
+      },
+    });
+    expect(res.status()).toBe(202);
+  });
+
+  test("filters are kept in the URL and a row opens the request", async ({ page }) => {
+    await signIn(page);
+    await page.goto("/requests?tag=suite:e2e");
+    await expect(page.getByRole("heading", { name: "Requests" })).toBeVisible();
+    await page.getByRole("button", { name: "Succeeded", exact: true }).click();
+    await expect(page).toHaveURL(/status=succeeded/);
+    await page.getByRole("button", { name: "Succeeded", exact: true }).click();
+    await expect(page).not.toHaveURL(/status=/);
+
+    await page.getByRole("link", { name: /POST \/e2e/ }).first().click();
+    await expect(page.getByRole("heading", { name: "Attempts" })).toBeVisible();
+    await expect(page.getByText("suite: e2e")).toBeVisible();
+  });
+
+  test("the detail page never shows secret header values", async ({ page }) => {
+    await signIn(page);
+    await page.goto("/requests?tag=suite:e2e");
+    await page.getByRole("link", { name: /POST \/e2e/ }).first().click();
+    await expect(page.getByRole("heading", { name: "Request", exact: true })).toBeVisible();
+    await expect(page.getByText("t-1", { exact: true })).toBeVisible();
+    // The request's own headers and the copy-as-code snippet are redacted.
+    await expect(page.locator("dl", { hasText: "X-Trace" }).getByText("e2e-secret-value")).toHaveCount(0);
+    await expect(page.locator("pre", { hasText: "curl" })).not.toContainText("e2e-secret-value");
+  });
+
+  test("searching for a request ID opens it", async ({ page, request }) => {
+    const list = await (await request.get("/v1/requests?limit=1&tag=suite:e2e", { headers: { Authorization: `Bearer ${token}` } })).json();
+    const id = list.data[0].id as string;
+    await signIn(page);
+    await page.goto("/requests");
+    await page.getByLabel("Request ID or dedupe key").fill(id);
+    await page.getByRole("button", { name: "Apply" }).click();
+    await expect(page).toHaveURL(new RegExp(`/requests/${id}$`));
+  });
+
+  test("unknown request IDs show a friendly message", async ({ page }) => {
+    await signIn(page);
+    await page.goto("/requests/req_01ZZZZZZZZZZZZZZZZZZZZZZZZ");
+    await expect(page.getByText("Request not found")).toBeVisible();
+  });
+});

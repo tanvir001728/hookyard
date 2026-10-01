@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
-import { LayoutDashboard, LogOut, Menu, Moon, Sun, X, type LucideIcon } from "lucide-react";
+import { LayoutDashboard, List, LogOut, Menu, Moon, Sun, X, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useSession, useSignOut } from "@/lib/session";
 import { useTheme } from "@/lib/theme";
@@ -14,7 +14,10 @@ interface NavItem {
   exact?: boolean;
 }
 
-export const navItems: NavItem[] = [{ to: "/", label: "Overview", icon: LayoutDashboard, exact: true }];
+export const navItems: NavItem[] = [
+  { to: "/", label: "Overview", icon: LayoutDashboard, exact: true },
+  { to: "/requests", label: "Requests", icon: List },
+];
 
 
 function Nav({ onNavigate }: { onNavigate?: () => void }) {
