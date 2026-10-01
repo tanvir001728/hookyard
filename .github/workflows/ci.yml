@@ -51,6 +51,29 @@ jobs:
       - name: Coverage summary
         run: go tool cover -func=coverage.out | tail -1 >> "$GITHUB_STEP_SUMMARY"
 
+  dashboard:
+    name: Dashboard
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - name: Check generated API types are up to date
+        run: pnpm check:generated
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+
   build:
     name: Build
     runs-on: ubuntu-latest
@@ -61,10 +84,21 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-      - name: Build
-        run: make build
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - name: Build (with the embedded dashboard)
+        run: make web build
       - name: Smoke test
-        run: ./bin/hookyard version
+        run: |
+          ./bin/hookyard version
+          # The dashboard must be embedded, not the "not built" placeholder.
+          grep -aqF '<div id="root"></div>' bin/hookyard
 
   sdk:
     name: SDK

@@ -29,7 +29,7 @@ the approach before you invest time in it.
 
 ## Development setup
 
-Prerequisites: **Go 1.25+**, **Node.js 22+** with **pnpm**, and **Docker**.
+Prerequisites: **Go 1.26+**, **Node.js 22+** with **pnpm**, and **Docker**.
 
 ```sh
 git clone git@github.com:tanvir001728/hookyard.git

@@ -23,8 +23,15 @@ Hookyard reads two kinds of settings:
 | `HOOKYARD_POLL_INTERVAL` | | `1s` | How often the queue is checked when idle. New requests are picked up immediately. |
 | `HOOKYARD_REQUEST_RETENTION` | | `720h` | How long finished requests and their attempts are kept (`0` keeps them forever) |
 | `HOOKYARD_METRICS` | | `false` | Serve Prometheus metrics at `/metrics` |
+| `HOOKYARD_DASHBOARD` | | `true` | Serve the web dashboard at `/` |
 
 Hookyard needs **PostgreSQL 14 or newer**.
+
+### Dashboard sign-in
+
+The dashboard at `/` asks for one of the API tokens. Signing in exchanges it for an HTTP-only,
+`SameSite=Strict` session cookie valid for 12 hours, so the token is never stored in the browser.
+Pasting a whole `name:secret` entry also works. Removing or rotating a token signs out its sessions.
 
 ### Data retention
 

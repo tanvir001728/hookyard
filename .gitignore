@@ -14,7 +14,8 @@ go.work.sum
 # Node / web
 node_modules/
 .pnpm-store/
-web/dist/
+web/dist/*
+!web/dist/.gitkeep
 sdk/typescript/dist/
 *.tsbuildinfo
 

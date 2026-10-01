@@ -40,6 +40,8 @@ type Server struct {
 	PollInterval time.Duration
 	// Metrics enables the Prometheus endpoint at /metrics.
 	Metrics bool
+	// Dashboard serves the web dashboard at /.
+	Dashboard bool
 	// RequestRetention is how long finished requests are kept. Zero keeps
 	// them forever.
 	RequestRetention time.Duration
@@ -60,6 +62,7 @@ func DefaultServer() Server {
 		Workers:          32,
 		PollInterval:     time.Second,
 		RequestRetention: 30 * 24 * time.Hour,
+		Dashboard:        true,
 	}
 }
 
@@ -127,6 +130,13 @@ func ServerFromEnv(lookup func(string) (string, bool)) (Server, error) {
 			return cfg, fmt.Errorf("HOOKYARD_METRICS: %w", err)
 		}
 		cfg.Metrics = b
+	}
+	if v, ok := lookup("HOOKYARD_DASHBOARD"); ok {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return cfg, fmt.Errorf("HOOKYARD_DASHBOARD: %w", err)
+		}
+		cfg.Dashboard = b
 	}
 	if v, ok := lookup("HOOKYARD_REQUEST_RETENTION"); ok {
 		d, err := time.ParseDuration(v)

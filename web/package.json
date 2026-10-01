@@ -1,0 +1,45 @@
+{
+  "name": "@hookyard/dashboard",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Hookyard's built-in web dashboard, embedded into the server binary.",
+  "license": "MIT",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "generate": "openapi-typescript ../api/openapi.yaml -o src/lib/openapi.ts",
+    "check:generated": "openapi-typescript ../api/openapi.yaml -o src/lib/openapi.ts && git diff --exit-code -- src/lib/openapi.ts",
+    "e2e": "playwright test"
+  },
+  "packageManager": "pnpm@10.6.4",
+  "dependencies": {
+    "@tanstack/react-query": "^5.104.0",
+    "@tanstack/react-router": "^1.170.40",
+    "clsx": "^2.1.1",
+    "lucide-react": "^1.48.0",
+    "react": "^19",
+    "react-dom": "^19",
+    "recharts": "^3.10.1",
+    "tailwind-merge": "^3.7.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "@tailwindcss/vite": "^4.3.3",
+    "@testing-library/jest-dom": "^7.0.1",
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.7",
+    "@types/node": "22",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.1",
+    "jsdom": "^30.1.1",
+    "openapi-typescript": "^7.13.0",
+    "tailwindcss": "^4.3.3",
+    "typescript": "~5.9.3",
+    "vite": "^8.3.1",
+    "vitest": "^5.0.2"
+  }
+}

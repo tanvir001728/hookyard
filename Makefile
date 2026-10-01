@@ -30,6 +30,20 @@ build: ## Build hookyard and flakyvendor into ./bin
 flakyvendor: build ## Run the flaky test vendor on :9090
 	./$(BIN_DIR)/flakyvendor
 
+.PHONY: web
+web: ## Build the dashboard into web/dist (embedded by the next make build)
+	pnpm --dir web install --frozen-lockfile
+	pnpm --dir web build
+
+.PHONY: web-dev
+web-dev: ## Run the dashboard dev server on :5173 (proxies the API on :8080)
+	pnpm --dir web dev
+
+.PHONY: web-test
+web-test: ## Typecheck and test the dashboard
+	pnpm --dir web typecheck
+	pnpm --dir web test
+
 .PHONY: run
 run: build ## Build and run the server against the dev database (make dev-db)
 	HOOKYARD_DATABASE_URL="$${HOOKYARD_DATABASE_URL:-$(DEV_DB_URL)}" \
