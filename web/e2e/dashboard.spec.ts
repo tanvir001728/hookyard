@@ -43,3 +43,25 @@ test("unknown pages show a not-found message", async ({ page }) => {
   await page.goto("/definitely/not/here");
   await expect(page.getByText("Page not found")).toBeVisible();
 });
+
+test("the overview shows health per upstream and a deliveries chart", async ({ page }) => {
+  await signIn(page);
+  await expect(page.getByRole("heading", { name: "Deliveries" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Upstreams" })).toBeVisible();
+  // Every health badge pairs an icon with a text label.
+  await expect(page.getByText(/^(Healthy|Degraded|Failing|No traffic)$/).first()).toBeVisible();
+});
+
+test("the time range is kept in the URL and the chart has a table view", async ({ page, isMobile }) => {
+  await signIn(page);
+  await page.getByRole("radio", { name: "24h" }).click();
+  await expect(page).toHaveURL(/range=24h/);
+  await expect(page.getByText("last 24 hours")).toBeVisible();
+
+  await page.getByRole("button", { name: "View as table" }).click();
+  await expect(page.getByRole("columnheader", { name: "Failed attempts" })).toBeVisible();
+
+  await page.reload();
+  await expect(page.getByRole("radio", { name: "24h" })).toHaveAttribute("aria-checked", "true");
+  if (!isMobile) await expect(page.getByRole("link", { name: "Overview" })).toHaveClass(/font-medium/);
+});
