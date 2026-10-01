@@ -2,6 +2,8 @@ import { createRootRoute, createRoute, createRouter, Outlet } from "@tanstack/re
 import { AppShell } from "@/components/layout/app-shell";
 import { NotFoundPage } from "@/pages/not-found";
 import { OverviewPage, ranges, type RangeKey } from "@/pages/overview";
+import { RequestDetailPage } from "@/pages/request-detail";
+import { RequestsPage, validateRequestsSearch } from "@/pages/requests";
 
 const rootRoute = createRootRoute({
   component: () => (
@@ -20,7 +22,16 @@ const overviewRoute = createRoute({
     typeof search.range === "string" && search.range in ranges ? { range: search.range as RangeKey } : {},
 });
 
-const routeTree = rootRoute.addChildren([overviewRoute]);
+const requestsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/requests",
+  component: RequestsPage,
+  validateSearch: validateRequestsSearch,
+});
+
+const requestDetailRoute = createRoute({ getParentRoute: () => rootRoute, path: "/requests/$id", component: RequestDetailPage });
+
+const routeTree = rootRoute.addChildren([overviewRoute, requestsRoute, requestDetailRoute]);
 
 export const router = createRouter({ routeTree, defaultPreload: "intent" });
 

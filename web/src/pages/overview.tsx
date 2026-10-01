@@ -1,6 +1,6 @@
 import { lazy, Suspense } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { getRouteApi, useNavigate } from "@tanstack/react-router";
+import { getRouteApi, Link, useNavigate } from "@tanstack/react-router";
 import { Activity, AlertTriangle, CheckCircle2, CircleDashed, Inbox, Server, XCircle, type LucideIcon } from "lucide-react";
 import { PageHeader } from "@/components/layout/app-shell";
 import { Badge, type BadgeTone } from "@/components/ui/badge";
@@ -95,6 +95,16 @@ function UpstreamCard({ stats, upstream, rangeLabel }: { stats: UpstreamStats; u
           />
           <Metric label="Dead letters" value={formatCount(stats.dlq_size)} hint={stats.dlq_size > 0 ? "need attention" : "none"} tone={stats.dlq_size > 0 ? "warning" : undefined} />
         </dl>
+        <div className="mt-4 flex flex-wrap gap-x-4 gap-y-1 border-t pt-3 text-xs">
+          <Link to="/requests" search={{ upstream: stats.upstream }} className="text-primary hover:underline">
+            View requests
+          </Link>
+          {stats.dlq_size > 0 && (
+            <Link to="/requests" search={{ upstream: stats.upstream, status: "dead" }} className="text-primary hover:underline">
+              View dead letters
+            </Link>
+          )}
+        </div>
       </CardContent>
     </Card>
   );
