@@ -37,6 +37,7 @@ Commands:
   serve     Run the Hookyard server
   migrate   Apply database migrations, or show their status
   validate  Check a hookyard.yaml config file
+  healthcheck  Exit 0 if a running Hookyard is ready (for container health checks)
   version   Print version information
 
 Run "hookyard <command> -h" for command flags.
@@ -67,6 +68,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return migrate(ctx, args[1:], stdout, stderr)
 	case "validate":
 		return validate(args[1:], stdout, stderr)
+	case "healthcheck":
+		return healthcheck(ctx, args[1:], stdout, stderr)
 	case "version", "--version", "-v":
 		fmt.Fprintln(stdout, version.String())
 		return nil
@@ -354,4 +357,43 @@ func retryLabel(p model.RetryPolicy) string {
 		return fmt.Sprintf("%s, %d attempts", p.Preset, p.MaxAttempts)
 	}
 	return fmt.Sprintf("custom, %d attempts", p.MaxAttempts)
+}
+
+// healthcheck queries /readyz of a running server. Container images without
+// curl use it for their health check.
+func healthcheck(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("healthcheck", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	defaultURL := "http://127.0.0.1:8080/readyz"
+	if addr := os.Getenv("HOOKYARD_ADDR"); addr != "" {
+		host, port, err := net.SplitHostPort(addr)
+		if err == nil {
+			if host == "" || host == "0.0.0.0" || host == "::" {
+				host = "127.0.0.1"
+			}
+			defaultURL = "http://" + net.JoinHostPort(host, port) + "/readyz"
+		}
+	}
+	url := fs.String("url", defaultURL, "readiness URL to check")
+	timeout := fs.Duration("timeout", 3*time.Second, "how long to wait for a response")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, *timeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, *url, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("not ready: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("not ready: %s returned %d", *url, resp.StatusCode)
+	}
+	fmt.Fprintln(stdout, "ready")
+	return nil
 }

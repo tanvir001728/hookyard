@@ -1,0 +1,58 @@
+# Hookyard with Postgres and a demo vendor, in one command:
+#
+#   docker compose -f deploy/docker-compose.yml up --build
+#
+# Then open http://localhost:8080 and sign in with the token below.
+# This setup is for trying Hookyard out. For production, use your own
+# Postgres, a real config file and strong API tokens.
+name: hookyard
+
+services:
+  hookyard:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: hookyard:local
+    ports:
+      - "${HOOKYARD_PORT:-8080}:8080"
+    environment:
+      HOOKYARD_DATABASE_URL: postgres://hookyard:hookyard@postgres:5432/hookyard?sslmode=disable
+      HOOKYARD_CONFIG: /etc/hookyard/hookyard.yaml
+      # Demo token. Replace it before exposing Hookyard anywhere.
+      HOOKYARD_API_TOKENS: ${HOOKYARD_API_TOKENS:-demo:hookyard-demo-token}
+      HOOKYARD_LOG_FORMAT: text
+      HOOKYARD_METRICS: "true"
+    volumes:
+      - ./hookyard.demo.yaml:/etc/hookyard/hookyard.yaml:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # A deliberately unreliable demo API (same image, different binary).
+  flakyvendor:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: hookyard:local
+    entrypoint: ["/usr/local/bin/flakyvendor"]
+    command: ["-addr", ":9090"]
+    healthcheck:
+      disable: true
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: hookyard
+      POSTGRES_PASSWORD: hookyard
+      POSTGRES_DB: hookyard
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hookyard -d hookyard"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+volumes:
+  postgres-data:

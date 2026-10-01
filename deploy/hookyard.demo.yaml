@@ -1,0 +1,14 @@
+# Demo configuration used by deploy/docker-compose.yml. Both upstreams point
+# at flakyvendor, a deliberately unreliable API: control its behavior through
+# the request path, for example /orders?fail_first=2 or /orders?status=500.
+upstreams:
+  demo:
+    base_url: http://flakyvendor:9090
+    timeout: 10s
+    retry:
+      preset: quick
+      initial_interval: 1s
+
+  demo-payments:
+    base_url: http://flakyvendor:9090/payments
+    retry: standard
