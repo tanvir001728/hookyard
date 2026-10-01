@@ -25,7 +25,7 @@ function Nav({ onNavigate }: { onNavigate?: () => void }) {
           key={to}
           to={to}
           onClick={onNavigate}
-          activeOptions={{ exact: exact ?? false }}
+          activeOptions={{ exact: exact ?? false, includeSearch: false }}
           className="flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           activeProps={{ className: "bg-muted font-medium !text-foreground" }}
         >

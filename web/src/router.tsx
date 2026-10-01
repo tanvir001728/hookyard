@@ -1,7 +1,7 @@
 import { createRootRoute, createRoute, createRouter, Outlet } from "@tanstack/react-router";
 import { AppShell } from "@/components/layout/app-shell";
 import { NotFoundPage } from "@/pages/not-found";
-import { OverviewPage } from "@/pages/overview";
+import { OverviewPage, ranges, type RangeKey } from "@/pages/overview";
 
 const rootRoute = createRootRoute({
   component: () => (
@@ -12,7 +12,13 @@ const rootRoute = createRootRoute({
   notFoundComponent: NotFoundPage,
 });
 
-const overviewRoute = createRoute({ getParentRoute: () => rootRoute, path: "/", component: OverviewPage });
+const overviewRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/",
+  component: OverviewPage,
+  validateSearch: (search: Record<string, unknown>): { range?: RangeKey } =>
+    typeof search.range === "string" && search.range in ranges ? { range: search.range as RangeKey } : {},
+});
 
 const routeTree = rootRoute.addChildren([overviewRoute]);
 
