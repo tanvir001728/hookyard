@@ -72,6 +72,24 @@ The name before `:` identifies the caller in logs and the audit log. Unnamed tok
 `token-1`, `token-2`, and so on. Tokens must be at least 16 characters. To rotate a token, add the new
 one, deploy, move clients over, then remove the old one.
 
+## Running with Docker
+
+The image runs `hookyard serve` as a non-root user and listens on port 8080. Mount your config file
+and pass settings as environment variables:
+
+```sh
+docker run -p 8080:8080 \
+  -v $PWD/hookyard.yaml:/etc/hookyard/hookyard.yaml:ro \
+  -e HOOKYARD_CONFIG=/etc/hookyard/hookyard.yaml \
+  -e HOOKYARD_DATABASE_URL=postgres://... \
+  -e HOOKYARD_API_TOKENS="orders:$(openssl rand -hex 32)" \
+  hookyard:local
+```
+
+Other commands run the same way, for example `docker run hookyard:local migrate status` or
+`docker run hookyard:local validate -config /etc/hookyard/hookyard.yaml`. The image's health check
+calls `hookyard healthcheck`, which exits non-zero unless `/readyz` reports ready.
+
 ## The config file
 
 See [`hookyard.example.yaml`](../hookyard.example.yaml) for an annotated example. Check a file

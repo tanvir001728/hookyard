@@ -1,0 +1,16 @@
+.git
+.github
+.claude
+bin
+dist
+**/node_modules
+web/dist/*
+!web/dist/.gitkeep
+web/test-results
+web/playwright-report
+sdk
+docs
+*.md
+!README.md
+hookyard.yaml
+.env*

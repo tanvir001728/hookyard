@@ -100,6 +100,42 @@ jobs:
           # The dashboard must be embedded, not the "not built" placeholder.
           grep -aqF '<div id="root"></div>' bin/hookyard
 
+  docker:
+    name: Docker
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build and start the quickstart stack
+        run: docker compose -f deploy/docker-compose.yml up -d --build
+      - name: Wait for Hookyard
+        run: |
+          for _ in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8080/readyz; then exit 0; fi
+            sleep 1
+          done
+          docker compose -f deploy/docker-compose.yml logs
+          exit 1
+      - name: Quickstart request is retried and delivered
+        run: |
+          curl -fsS -X POST http://127.0.0.1:8080/v1/requests \
+            -H "Authorization: Bearer hookyard-demo-token" \
+            -d '{"upstream":"demo","method":"POST","path":"/orders?fail_first=1","body":{"order_id":1}}'
+          for _ in $(seq 1 30); do
+            status=$(curl -fsS "http://127.0.0.1:8080/v1/requests?limit=1" -H "Authorization: Bearer hookyard-demo-token" | jq -r '.data[0].status')
+            if [ "$status" = "succeeded" ]; then echo "delivered"; exit 0; fi
+            sleep 1
+          done
+          echo "::error::request was not delivered (status: $status)"
+          exit 1
+      - name: Dashboard and health check work in the image
+        run: |
+          curl -fsS http://127.0.0.1:8080/ | grep -q 'id="root"'
+          test "$(docker inspect --format '{{.State.Health.Status}}' hookyard-hookyard-1)" = healthy || \
+            docker compose -f deploy/docker-compose.yml exec -T hookyard /usr/local/bin/hookyard healthcheck
+      - name: Logs
+        if: failure()
+        run: docker compose -f deploy/docker-compose.yml logs
+
   sdk:
     name: SDK
     runs-on: ubuntu-latest

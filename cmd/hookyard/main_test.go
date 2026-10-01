@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -87,5 +89,28 @@ func TestValidate(t *testing.T) {
 	err := run(context.Background(), []string{"validate", "-config", bad}, &bytes.Buffer{}, &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), "upstreams.courier-x.base_url") {
 		t.Errorf("expected base_url error, got %v", err)
+	}
+}
+
+func TestHealthcheck(t *testing.T) {
+	ready := true
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if !ready {
+			w.WriteHeader(http.StatusServiceUnavailable)
+		}
+	}))
+	defer srv.Close()
+
+	var out bytes.Buffer
+	if err := run(t.Context(), []string{"healthcheck", "-url", srv.URL}, &out, &bytes.Buffer{}); err != nil || out.String() != "ready\n" {
+		t.Fatalf("ready server: err=%v out=%q", err, out.String())
+	}
+	ready = false
+	if err := run(t.Context(), []string{"healthcheck", "-url", srv.URL}, &bytes.Buffer{}, &bytes.Buffer{}); err == nil || !strings.Contains(err.Error(), "503") {
+		t.Fatalf("unready server: err=%v", err)
+	}
+	srv.Close()
+	if err := run(t.Context(), []string{"healthcheck", "-url", srv.URL, "-timeout", "500ms"}, &bytes.Buffer{}, &bytes.Buffer{}); err == nil {
+		t.Fatal("unreachable server must fail")
 	}
 }

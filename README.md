@@ -69,6 +69,31 @@ Hookyard moves all of that into a single self-hosted service. Your application c
   replay failed requests with one click.
 - **Self-hosted.** A single Go binary; Postgres is the only dependency.
 
+## Quickstart
+
+You need Docker. This starts Hookyard, Postgres and a deliberately unreliable demo API:
+
+```sh
+git clone https://github.com/tanvir001728/hookyard.git
+cd hookyard
+docker compose -f deploy/docker-compose.yml up --build
+```
+
+Open **http://localhost:8080** and sign in with the demo token `hookyard-demo-token`. Then send a
+request to the demo upstream. The demo API fails the first attempt, so you'll see Hookyard retry it:
+
+```sh
+curl -X POST localhost:8080/v1/requests \
+  -H "Authorization: Bearer hookyard-demo-token" \
+  -d '{"upstream":"demo","method":"POST","path":"/orders?fail_first=1","body":{"order_id":1}}'
+```
+
+The dashboard shows the request, both attempts and the delivery stats. Try `/orders?status=500` to
+fill the dead-letter queue, then replay it from the **Dead letters** page.
+
+To run Hookyard against your own APIs, see [docs/configuration.md](docs/configuration.md) and
+[`hookyard.example.yaml`](hookyard.example.yaml).
+
 ## A quick look
 
 > [!NOTE]
