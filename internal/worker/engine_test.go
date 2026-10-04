@@ -255,9 +255,13 @@ func TestRetriesRunOnTime(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
 	// A long poll interval: retries must still run on time.
-	h.start(Config{PollInterval: 10 * time.Second})
+	e := h.start(Config{PollInterval: 10 * time.Second})
+	// Let the engine go idle first, then enqueue and wake it as the API does.
+	// Without the wakeup the first delivery would wait for the poll interval.
+	time.Sleep(200 * time.Millisecond)
 
 	req := h.enqueue("/orders?fail_first=2")
+	e.Notify()
 	start := time.Now()
 	h.waitStatus(req.ID, model.StatusSucceeded)
 	if took := time.Since(start); took > 2*time.Second {
