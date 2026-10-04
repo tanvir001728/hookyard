@@ -10,6 +10,7 @@ import {
   fromWireStatsOverview,
   fromWireStatsTimeseries,
   fromWireUpstream,
+  fromWireUpstreamEvent,
   toListQuery,
   toWireCreateRequest,
   toWireDlqReplay,
@@ -26,6 +27,7 @@ import type {
   HookyardClient,
   HookyardRequest,
   ListRequestsFilter,
+  PauseOptions,
   RequestPage,
   RequestsApi,
   SendInput,
@@ -36,6 +38,7 @@ import type {
   StatsTimeseriesOptions,
   Upstream,
   UpstreamClient,
+  UpstreamEvent,
   UpstreamsApi,
 } from "./types.js";
 import { createUpstreamClient } from "./upstream.js";
@@ -220,6 +223,27 @@ export class Hookyard implements HookyardClient {
           retry: true,
         });
         return fromWireUpstream(res.data);
+      },
+      async pause(name: string, options: PauseOptions = {}): Promise<Upstream> {
+        const body: Record<string, string> = {};
+        if (options.reason !== undefined) body.reason = options.reason;
+        if (options.until !== undefined) body.until = toWireTimestamp(options.until, "until");
+        if (options.duration !== undefined) body.duration = toWireDuration(options.duration, "duration");
+        // Pausing again only updates the reason and end, so retrying is safe.
+        const res = await transport.call<Schemas["Upstream"]>({ method: "POST", path: `/v1/upstreams/${enc(name)}/pause`, body, retry: true });
+        return fromWireUpstream(res.data);
+      },
+      async resume(name: string, options: { reason?: string | undefined } = {}): Promise<Upstream> {
+        const body = options.reason !== undefined ? { reason: options.reason } : {};
+        // Not retried: a retry after a resume that went through would report "not paused".
+        const res = await transport.call<Schemas["Upstream"]>({ method: "POST", path: `/v1/upstreams/${enc(name)}/resume`, body, retry: false });
+        return fromWireUpstream(res.data);
+      },
+      async events(name: string, options: { limit?: number | undefined } = {}): Promise<UpstreamEvent[]> {
+        const query = new URLSearchParams();
+        if (options.limit !== undefined) query.set("limit", String(options.limit));
+        const res = await transport.call<{ data: Schemas["UpstreamEvent"][] }>({ method: "GET", path: `/v1/upstreams/${enc(name)}/events`, query, retry: true });
+        return res.data.data.map(fromWireUpstreamEvent);
       },
     };
 

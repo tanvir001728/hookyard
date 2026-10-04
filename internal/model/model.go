@@ -150,3 +150,16 @@ type Attempt struct {
 	Response   *AttemptResponse
 	RetryAt    *time.Time
 }
+
+// UpstreamLive is an upstream's live delivery state in this process.
+type UpstreamLive struct {
+	// Breaker is "closed", "open", "half_open", or "off" when disabled.
+	Breaker      string
+	BreakerSince time.Time
+	InFlight     int
+	// Tokens is the number of requests the rate limit allows right now, or
+	// -1 without a rate limit.
+	Tokens int
+	// ThrottledUntil is set while deliveries are held back after a 429.
+	ThrottledUntil time.Time
+}

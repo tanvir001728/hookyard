@@ -212,7 +212,7 @@ func (s *Store) ReplayDead(ctx context.Context, f DLQFilter, dryRun bool, actor 
 	return n, n, tx.Commit(ctx)
 }
 
-func insertAudit(ctx context.Context, tx pgx.Tx, actor, action, targetType, targetID string, details any) error {
+func insertAudit(ctx context.Context, tx querier, actor, action, targetType, targetID string, details any) error {
 	b, err := json.Marshal(details)
 	if err != nil {
 		return fmt.Errorf("encode audit details: %w", err)

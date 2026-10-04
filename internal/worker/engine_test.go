@@ -619,3 +619,55 @@ func TestPausedTimeDoesNotCountAgainstMaxAge(t *testing.T) {
 		t.Errorf("attempt_count = %d, want 2", done.AttemptCount)
 	}
 }
+
+func TestOperatorPauseAndResume(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	e := h.start(Config{})
+	ctx := context.Background()
+
+	if _, err := h.store.PauseUpstream(ctx, store.Pause{Upstream: "flaky", Reason: "maintenance", Actor: "ops"}); err != nil {
+		t.Fatal(err)
+	}
+	e.UpstreamsChanged()
+	time.Sleep(100 * time.Millisecond)
+
+	// A 300ms max_age, but the request waits through a 1s pause.
+	req := h.enqueue("/paused", func(in *store.NewRequest) {
+		in.Retry = model.RetryPolicy{MaxAttempts: 3, InitialInterval: 50 * time.Millisecond, MaxInterval: 50 * time.Millisecond, Multiplier: 1, MaxAge: 300 * time.Millisecond}
+	})
+	e.Notify()
+	time.Sleep(time.Second)
+	if n := len(h.receivedAt("/paused")); n != 0 {
+		t.Fatalf("a paused upstream received %d requests", n)
+	}
+	if live, _ := e.UpstreamLive("flaky"); live.InFlight != 0 {
+		t.Errorf("in flight while paused: %+v", live)
+	}
+
+	if ok, err := h.store.ResumeUpstream(ctx, "flaky", "ops", "done"); err != nil || !ok {
+		t.Fatalf("resume: %v %v", ok, err)
+	}
+	e.UpstreamsChanged()
+	h.waitStatus(req.ID, model.StatusSucceeded)
+}
+
+func TestTimedPauseEndsOnItsOwn(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	e := h.start(Config{})
+
+	until := time.Now().Add(700 * time.Millisecond)
+	if _, err := h.store.PauseUpstream(context.Background(), store.Pause{Upstream: "flaky", Until: &until, Actor: "ops"}); err != nil {
+		t.Fatal(err)
+	}
+	e.UpstreamsChanged()
+	time.Sleep(50 * time.Millisecond)
+
+	req := h.enqueue("/timed")
+	e.Notify()
+	h.waitStatus(req.ID, model.StatusSucceeded)
+	if at := h.receivedAt("/timed"); at[0].Before(until) {
+		t.Errorf("delivered %s before the pause ended", until.Sub(at[0]))
+	}
+}

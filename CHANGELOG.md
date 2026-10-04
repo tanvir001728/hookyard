@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Pause and resume upstreams (`POST /v1/upstreams/{name}/pause` and `/resume`, or the SDK), with a
+  reason and an optional end time. Pauses survive restarts and are audit-logged. `GET /v1/upstreams`
+  now includes each upstream's live state, `GET /v1/upstreams/{name}/events` its history, and
+  Prometheus gauges for breaker and pause state.
 - A circuit breaker per upstream, on by default (`breaker`). When a vendor keeps failing, deliveries
   to it pause instead of burning retries; after a cooldown a few probe requests decide whether to
   resume. Paused time doesn't count against a request's `max_age`, and every transition is recorded

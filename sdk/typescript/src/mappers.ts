@@ -18,6 +18,7 @@ import type {
   StatsOverview,
   StatsTimeseries,
   Upstream,
+  UpstreamEvent,
 } from "./types.js";
 
 type Schemas = components["schemas"];
@@ -125,7 +126,22 @@ export function fromWireUpstream(u: Schemas["Upstream"]): Upstream {
       burst: u.limits.burst ?? null,
       maxConcurrency: u.limits.max_concurrency ?? null,
     },
+    state: {
+      status: u.state.status,
+      breaker: u.state.breaker,
+      breakerSince: optionalDate(u.state.breaker_since),
+      pause: u.state.pause
+        ? { since: new Date(u.state.pause.since), until: optionalDate(u.state.pause.until), reason: u.state.pause.reason, by: u.state.pause.by }
+        : null,
+      inFlight: u.state.in_flight,
+      availableTokens: u.state.available_tokens ?? null,
+      throttledUntil: optionalDate(u.state.throttled_until),
+    },
   };
+}
+
+export function fromWireUpstreamEvent(e: Schemas["UpstreamEvent"]): UpstreamEvent {
+  return { id: e.id, at: new Date(e.at), kind: e.kind, reason: e.reason, actor: e.actor, details: e.details };
 }
 
 export function fromWireStatsOverview(s: Schemas["StatsOverview"]): StatsOverview {

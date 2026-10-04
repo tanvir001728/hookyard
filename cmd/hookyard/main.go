@@ -183,10 +183,10 @@ func serve(ctx context.Context, args []string, stderr io.Writer) error {
 
 	apiOpts := []api.Option{
 		api.WithReadinessCheck("database", db.Ping),
-		api.WithV1(api.V1{Store: db, Config: file, Tokens: cfg.APITokens, MaxBody: cfg.MaxBodyBytes, Notify: engine.Notify}),
+		api.WithV1(api.V1{Store: db, Config: file, Tokens: cfg.APITokens, MaxBody: cfg.MaxBodyBytes, Notify: engine.Notify, Monitor: engine}),
 	}
 	if cfg.Metrics {
-		apiOpts = append(apiOpts, api.WithMetrics(collector.MetricsHandler(queueGauges(db))))
+		apiOpts = append(apiOpts, api.WithMetrics(collector.MetricsHandler(upstreamGauges(db, file.Upstreams, engine))))
 	}
 	if cfg.Dashboard {
 		apiOpts = append(apiOpts, api.WithDashboard(web.Handler()))
@@ -231,15 +231,31 @@ func serve(ctx context.Context, args []string, stderr io.Writer) error {
 	return nil
 }
 
-func queueGauges(db *store.Store) stats.QueueGauges {
+// upstreamGauges combines queue sizes and pauses from the database with the
+// engine's live breaker state, for the Prometheus endpoint.
+func upstreamGauges(db *store.Store, upstreams *config.Registry, engine *worker.Engine) stats.QueueGauges {
 	return func(ctx context.Context) (map[string]stats.QueueGauge, error) {
 		q, err := db.QueueStats(ctx)
 		if err != nil {
 			return nil, err
 		}
-		out := make(map[string]stats.QueueGauge, len(q))
-		for u, s := range q {
-			out[u] = stats.QueueGauge{Waiting: s.Waiting, Dead: s.Dead}
+		pauses, err := db.ListPauses(ctx)
+		if err != nil {
+			return nil, err
+		}
+		out := make(map[string]stats.QueueGauge, upstreams.Len())
+		for _, name := range upstreams.Names() {
+			g := stats.QueueGauge{Waiting: q[name].Waiting, Dead: q[name].Dead}
+			_, g.Paused = pauses[name]
+			if live, ok := engine.UpstreamLive(name); ok {
+				switch live.Breaker {
+				case "open":
+					g.BreakerOpen = 1
+				case "half_open":
+					g.BreakerOpen = 0.5
+				}
+			}
+			out[name] = g
 		}
 		return out, nil
 	}

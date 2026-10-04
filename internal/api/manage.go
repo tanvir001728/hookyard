@@ -215,35 +215,15 @@ func (s *Server) handleDLQReplay(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"matched": matched, "replayed": replayed, "dry_run": in.DryRun})
 }
 
-func (s *Server) handleListUpstreams(w http.ResponseWriter, _ *http.Request) {
-	ups := s.v1.Config.Upstreams.All()
-	resp := struct {
-		Data []upstreamJSON `json:"data"`
-	}{Data: make([]upstreamJSON, len(ups))}
-	for i, u := range ups {
-		resp.Data[i] = toUpstreamJSON(u)
-	}
-	writeJSON(w, http.StatusOK, resp)
-}
-
-func (s *Server) handleGetUpstream(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
-	u, ok := s.v1.Config.Upstreams.Get(name)
-	if !ok {
-		writeError(w, http.StatusNotFound, codeNotFound, s.v1.Config.Upstreams.UnknownUpstreamMessage(name))
-		return
-	}
-	writeJSON(w, http.StatusOK, toUpstreamJSON(u))
-}
-
 // upstreamJSON never includes header values: they usually hold credentials.
 type upstreamJSON struct {
-	Name        string          `json:"name"`
-	BaseURL     string          `json:"base_url"`
-	Timeout     model.Duration  `json:"timeout"`
-	Retry       retryPolicyJSON `json:"retry"`
-	HeaderNames []string        `json:"header_names"`
-	Limits      limitsJSON      `json:"limits"`
+	Name        string            `json:"name"`
+	BaseURL     string            `json:"base_url"`
+	Timeout     model.Duration    `json:"timeout"`
+	Retry       retryPolicyJSON   `json:"retry"`
+	HeaderNames []string          `json:"header_names"`
+	Limits      limitsJSON        `json:"limits"`
+	State       upstreamStateJSON `json:"state"`
 }
 
 type limitsJSON struct {
@@ -264,7 +244,7 @@ func toLimitsJSON(l config.Limits) limitsJSON {
 	return out
 }
 
-func toUpstreamJSON(u config.Upstream) upstreamJSON {
+func (s *Server) toUpstreamJSON(u config.Upstream, pause *store.Pause) upstreamJSON {
 	names := make([]string, 0, len(u.Headers))
 	for k := range u.Headers {
 		names = append(names, k)
@@ -277,6 +257,7 @@ func toUpstreamJSON(u config.Upstream) upstreamJSON {
 		Retry:       toRetryJSON(u.Retry),
 		HeaderNames: names,
 		Limits:      toLimitsJSON(u.Limits),
+		State:       s.upstreamState(u, pause),
 	}
 }
 
