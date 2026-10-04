@@ -184,6 +184,7 @@ export function createFakeHookyard(options: FakeHookyardOptions = {}): FakeHooky
         error: status === "succeeded" ? null : error,
         response: statusCode === null ? null : { headers: {}, body: "", bodyTruncated: false },
         retryAt: null,
+        classifiedBy: null,
       });
     }
   };

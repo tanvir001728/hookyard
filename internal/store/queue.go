@@ -217,10 +217,10 @@ func (s *Store) RecordAttempt(ctx context.Context, rec AttemptRecord) error {
 
 	_, err = tx.Exec(ctx, `
 		INSERT INTO attempts (request_id, number, started_at, duration_ms, outcome, status_code,
-			error_code, error_message, response_headers, response_body, response_body_truncated, retry_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+			error_code, error_message, response_headers, response_body, response_body_truncated, retry_at, classified_by)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NULLIF($13, ''))`,
 		a.RequestID, a.Number, a.StartedAt, a.Duration.Milliseconds(), string(a.Outcome), a.StatusCode,
-		errCode, errMsg, nullJSON(respHeaders), respBody, truncated, a.RetryAt)
+		errCode, errMsg, nullJSON(respHeaders), respBody, truncated, a.RetryAt, a.ClassifiedBy)
 	if err != nil {
 		return fmt.Errorf("insert attempt: %w", err)
 	}

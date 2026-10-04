@@ -149,6 +149,9 @@ type Attempt struct {
 	Error      *DeliveryError
 	Response   *AttemptResponse
 	RetryAt    *time.Time
+	// ClassifiedBy names the classification rule that decided the outcome,
+	// or is empty when the default rules applied.
+	ClassifiedBy string
 }
 
 // UpstreamLive is an upstream's live delivery state in this process.

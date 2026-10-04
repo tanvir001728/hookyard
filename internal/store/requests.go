@@ -261,7 +261,8 @@ func (s *Store) ListRequests(ctx context.Context, f RequestFilter) (RequestPage,
 func (s *Store) ListAttempts(ctx context.Context, requestID string) ([]model.Attempt, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT request_id, number, started_at, duration_ms, outcome, status_code, error_code,
-			error_message, response_headers, response_body, response_body_truncated, retry_at
+			error_message, response_headers, response_body, response_body_truncated, retry_at,
+			COALESCE(classified_by, '')
 		FROM attempts WHERE request_id = $1 ORDER BY number`, requestID)
 	if err != nil {
 		return nil, fmt.Errorf("list attempts: %w", err)
@@ -338,7 +339,7 @@ func scanAttempt(row pgx.CollectableRow) (model.Attempt, error) {
 		truncated       bool
 	)
 	err := row.Scan(&a.RequestID, &a.Number, &a.StartedAt, &durationMS, &outcome, &a.StatusCode,
-		&errCode, &errMsg, &respHeaders, &respBody, &truncated, &a.RetryAt)
+		&errCode, &errMsg, &respHeaders, &respBody, &truncated, &a.RetryAt, &a.ClassifiedBy)
 	if err != nil {
 		return model.Attempt{}, err
 	}

@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tanvir001728/hookyard/internal/breaker"
+	"github.com/tanvir001728/hookyard/internal/classify"
 	"github.com/tanvir001728/hookyard/internal/config"
 	"github.com/tanvir001728/hookyard/internal/flakyvendor"
 	"github.com/tanvir001728/hookyard/internal/model"
@@ -603,16 +604,17 @@ func TestBreakerPausesAndRecovers(t *testing.T) {
 
 func TestPausedTimeDoesNotCountAgainstMaxAge(t *testing.T) {
 	t.Parallel()
-	h := newHarnessWith(t, breakerUpstream(1500*time.Millisecond))
+	h := newHarnessWith(t, breakerUpstream(3*time.Second))
 	h.start(Config{})
 
 	h.tripBreaker()
 
-	// A probe that will succeed, then a request with a 1s max_age that waits
-	// out a 1.5s pause, fails once, and must still be retried.
+	// A probe that will succeed, then a request with a 2s max_age that waits
+	// out a 3s pause, fails once, and must still be retried. The pause must
+	// outlast max_age; the margins leave room for heavily loaded machines.
 	h.enqueue("/probe")
 	short := h.enqueue("/short?fail_first=1&key=short", func(in *store.NewRequest) {
-		in.Retry = model.RetryPolicy{MaxAttempts: 5, InitialInterval: 50 * time.Millisecond, MaxInterval: 100 * time.Millisecond, Multiplier: 2, MaxAge: time.Second}
+		in.Retry = model.RetryPolicy{MaxAttempts: 5, InitialInterval: 50 * time.Millisecond, MaxInterval: 100 * time.Millisecond, Multiplier: 2, MaxAge: 2 * time.Second}
 	})
 	done := h.waitStatus(short.ID, model.StatusSucceeded)
 	if done.AttemptCount != 2 {
@@ -669,5 +671,48 @@ func TestTimedPauseEndsOnItsOwn(t *testing.T) {
 	h.waitStatus(req.ID, model.StatusSucceeded)
 	if at := h.receivedAt("/timed"); at[0].Before(until) {
 		t.Errorf("delivered %s before the pause ended", until.Sub(at[0]))
+	}
+}
+
+func TestClassificationRules(t *testing.T) {
+	t.Parallel()
+	failed := classify.Value{V: "FAILED"}
+	statusPath, _ := classify.ParsePath("status")
+	ok200, _ := classify.ParseStatus("200")
+	conflict, _ := classify.ParseStatus("409")
+	up := config.Upstream{
+		Name: "flaky", Timeout: 2 * time.Second, Retry: fastRetry,
+		Classify: classify.Rules{
+			{Name: "fake success", Status: ok200, Path: statusPath, Cond: classify.Condition{Equals: &failed}, Then: model.OutcomeRetryableFailure},
+			{Name: "already exists", Status: conflict, Then: model.OutcomeSuccess},
+		},
+	}
+	h := newHarnessWith(t, up)
+	h.start(Config{})
+
+	// A 200 that reports a failure in its body is retried, then dead-lettered.
+	fake := h.enqueue("/orders?fake_error=1", func(in *store.NewRequest) { in.Retry.MaxAttempts = 2 })
+	dead := h.waitStatus(fake.ID, model.StatusDead)
+	if dead.AttemptCount != 2 || dead.LastError == nil || dead.LastError.Code != ErrCodeClassifiedFailure || *dead.LastStatusCode != 200 {
+		t.Errorf("fake 200 = %+v (last error %+v)", dead, dead.LastError)
+	}
+	attempts := h.attempts(fake.ID)
+	if attempts[0].ClassifiedBy != "fake success" || attempts[0].Outcome != model.OutcomeRetryableFailure ||
+		!strings.Contains(attempts[0].Error.Message, `rule "fake success"`) {
+		t.Errorf("attempt = %+v (error %+v)", attempts[0], attempts[0].Error)
+	}
+
+	// A 409 counts as success because of a rule.
+	dup := h.enqueue("/orders?status=409")
+	done := h.waitStatus(dup.ID, model.StatusSucceeded)
+	if done.LastError != nil || h.attempts(dup.ID)[0].ClassifiedBy != "already exists" {
+		t.Errorf("409 = %+v", done)
+	}
+
+	// Without a matching rule, the default classification applies and no rule is recorded.
+	plain := h.enqueue("/orders")
+	h.waitStatus(plain.ID, model.StatusSucceeded)
+	if by := h.attempts(plain.ID)[0].ClassifiedBy; by != "" {
+		t.Errorf("default classification recorded rule %q", by)
 	}
 }

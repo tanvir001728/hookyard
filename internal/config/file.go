@@ -15,6 +15,7 @@ import (
 	"go.yaml.in/yaml/v3"
 
 	"github.com/tanvir001728/hookyard/internal/breaker"
+	"github.com/tanvir001728/hookyard/internal/classify"
 	"github.com/tanvir001728/hookyard/internal/model"
 	"github.com/tanvir001728/hookyard/internal/ratelimit"
 	"github.com/tanvir001728/hookyard/internal/retry"
@@ -58,6 +59,7 @@ type upstreamSchema struct {
 	Burst          *int              `yaml:"burst"`
 	MaxConcurrency *int              `yaml:"max_concurrency"`
 	Breaker        breakerSpec       `yaml:"breaker"`
+	Classify       []ruleSchema      `yaml:"classify"`
 }
 
 // Defaults are the resolved global defaults that apply to every upstream.
@@ -91,6 +93,8 @@ type Upstream struct {
 	DedupeWindow time.Duration
 	Limits       Limits
 	Breaker      Breaker
+	// Classify rules decide how responses count; empty means the defaults.
+	Classify classify.Rules
 }
 
 // File is a loaded and validated configuration file.
@@ -174,6 +178,17 @@ func checkKnownFields(n *yaml.Node, t reflect.Type, path string) error {
 		v := reflect.New(t).Interface().(encoding.TextUnmarshaler)
 		if err := v.UnmarshalText([]byte(n.Value)); err != nil {
 			return fmt.Errorf("line %d: %s: %w", n.Line, path, err)
+		}
+		return nil
+	}
+	if t == reflect.TypeFor[yaml.Node]() || t.Kind() == reflect.Interface {
+		return nil // raw values, checked where they are used
+	}
+	if n.Kind == yaml.SequenceNode && t.Kind() == reflect.Slice {
+		for i, c := range n.Content {
+			if err := checkKnownFields(c, t.Elem(), fmt.Sprintf("%s[%d]", path, i)); err != nil {
+				return err
+			}
 		}
 		return nil
 	}
@@ -314,6 +329,7 @@ func resolve(raw fileSchema) (*File, error) {
 		up := Upstream{Name: name, Timeout: defaults.Timeout, Retry: defaults.Retry, DedupeWindow: defaults.DedupeWindow}
 		up.Limits = resolveLimits(prefix, defaults.Limits, u.RateLimit, u.Burst, u.MaxConcurrency, add)
 		up.Breaker = resolveBreaker(prefix+".breaker", defaults.Breaker, u.Breaker, add)
+		up.Classify = resolveRules(prefix+".classify", u.Classify, add)
 
 		if base, err := parseBaseURL(u.BaseURL); err != nil {
 			add(prefix+".base_url", "%s", err)

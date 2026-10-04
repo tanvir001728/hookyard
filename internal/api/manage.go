@@ -19,7 +19,7 @@ import (
 const maxReplayIDs = 1000
 
 // deliveryErrorCodes are the documented values of DeliveryErrorCode.
-var deliveryErrorCodes = []string{"timeout", "connection", "http_status", "max_age_exceeded", "canceled", "internal"}
+var deliveryErrorCodes = []string{"timeout", "connection", "http_status", "classified_failure", "max_age_exceeded", "canceled", "internal"}
 
 func (s *Server) handleListRequests(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
@@ -262,14 +262,15 @@ func (s *Server) toUpstreamJSON(u config.Upstream, pause *store.Pause) upstreamJ
 }
 
 type attemptJSON struct {
-	Number     int                  `json:"number"`
-	StartedAt  time.Time            `json:"started_at"`
-	DurationMS int64                `json:"duration_ms"`
-	Outcome    model.AttemptOutcome `json:"outcome"`
-	StatusCode *int                 `json:"status_code"`
-	Error      *deliveryError       `json:"error"`
-	Response   *attemptResponseJSON `json:"response"`
-	RetryAt    *time.Time           `json:"retry_at"`
+	Number       int                  `json:"number"`
+	StartedAt    time.Time            `json:"started_at"`
+	DurationMS   int64                `json:"duration_ms"`
+	Outcome      model.AttemptOutcome `json:"outcome"`
+	StatusCode   *int                 `json:"status_code"`
+	Error        *deliveryError       `json:"error"`
+	Response     *attemptResponseJSON `json:"response"`
+	RetryAt      *time.Time           `json:"retry_at"`
+	ClassifiedBy *string              `json:"classified_by"`
 }
 
 type attemptResponseJSON struct {
@@ -289,6 +290,9 @@ func toAttemptJSON(a model.Attempt) attemptJSON {
 	}
 	if a.Error != nil {
 		out.Error = &deliveryError{Code: a.Error.Code, Message: a.Error.Message}
+	}
+	if a.ClassifiedBy != "" {
+		out.ClassifiedBy = &a.ClassifiedBy
 	}
 	if a.Response != nil {
 		out.Response = &attemptResponseJSON{Headers: nonNil(a.Response.Headers), Body: a.Response.Body, BodyTruncated: a.Response.BodyTruncated}
