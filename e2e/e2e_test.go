@@ -75,6 +75,12 @@ func run(m *testing.M) int {
 		panic(err)
 	}
 	defer func() { _ = vendor.Process.Kill() }()
+	// The port was free a moment ago, but another process could have taken
+	// it: make sure flakyvendor itself is answering before any test runs.
+	if !waitFor("http://"+stack.vendor+"/_health", 10*time.Second) {
+		fmt.Fprintln(os.Stderr, "flakyvendor did not start on", stack.vendor)
+		return 1
+	}
 
 	stack.config = filepath.Join(dir, "hookyard.yaml")
 	cfg := fmt.Sprintf("upstreams:\n  flaky:\n    base_url: http://%s\n    timeout: 3s\n    retry: { preset: quick, max_attempts: 5, initial_interval: 100ms, max_interval: 200ms }\n", stack.vendor)
@@ -113,12 +119,20 @@ func startHookyard() error {
 		return err
 	}
 	stack.hookyard = cmd
-	for deadline := time.Now().Add(15 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
-		if status, _ := get("http://" + stack.addr + "/readyz"); status == http.StatusOK {
-			return nil
+	if !waitFor("http://"+stack.addr+"/readyz", 15*time.Second) {
+		return fmt.Errorf("hookyard did not become ready")
+	}
+	return nil
+}
+
+// waitFor polls url until it answers 200 OK or the timeout passes.
+func waitFor(url string, timeout time.Duration) bool {
+	for deadline := time.Now().Add(timeout); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
+		if status, _ := get(url); status == http.StatusOK {
+			return true
 		}
 	}
-	return fmt.Errorf("hookyard did not become ready")
+	return false
 }
 
 // stopHookyard sends sig and waits for the process to exit.

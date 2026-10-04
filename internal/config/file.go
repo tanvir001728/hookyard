@@ -14,6 +14,7 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
+	"github.com/tanvir001728/hookyard/internal/breaker"
 	"github.com/tanvir001728/hookyard/internal/model"
 	"github.com/tanvir001728/hookyard/internal/ratelimit"
 	"github.com/tanvir001728/hookyard/internal/retry"
@@ -44,6 +45,7 @@ type defaultsSchema struct {
 	RateLimit      *string         `yaml:"rate_limit"`
 	Burst          *int            `yaml:"burst"`
 	MaxConcurrency *int            `yaml:"max_concurrency"`
+	Breaker        breakerSpec     `yaml:"breaker"`
 }
 
 type upstreamSchema struct {
@@ -55,6 +57,7 @@ type upstreamSchema struct {
 	RateLimit      *string           `yaml:"rate_limit"`
 	Burst          *int              `yaml:"burst"`
 	MaxConcurrency *int              `yaml:"max_concurrency"`
+	Breaker        breakerSpec       `yaml:"breaker"`
 }
 
 // Defaults are the resolved global defaults that apply to every upstream.
@@ -63,6 +66,7 @@ type Defaults struct {
 	Retry        model.RetryPolicy
 	DedupeWindow time.Duration
 	Limits       Limits
+	Breaker      Breaker
 }
 
 // Limits throttle deliveries to one upstream, per Hookyard instance.
@@ -86,6 +90,7 @@ type Upstream struct {
 	Headers      map[string]string
 	DedupeWindow time.Duration
 	Limits       Limits
+	Breaker      Breaker
 }
 
 // File is a loaded and validated configuration file.
@@ -103,7 +108,7 @@ func Empty() *File {
 
 func builtinDefaults() Defaults {
 	p, _ := retry.Preset(retry.DefaultPreset)
-	return Defaults{Timeout: DefaultTimeout, Retry: p, DedupeWindow: DefaultDedupeWindow}
+	return Defaults{Timeout: DefaultTimeout, Retry: p, DedupeWindow: DefaultDedupeWindow, Breaker: Breaker{Enabled: true, Config: breaker.Defaults}}
 }
 
 // LoadFile reads the config file at path. If path is empty, it loads
@@ -297,6 +302,7 @@ func resolve(raw fileSchema) (*File, error) {
 		defaults.Retry = p
 	}
 	defaults.Limits = resolveLimits("defaults", Limits{}, raw.Defaults.RateLimit, raw.Defaults.Burst, raw.Defaults.MaxConcurrency, add)
+	defaults.Breaker = resolveBreaker("defaults.breaker", defaults.Breaker, raw.Defaults.Breaker, add)
 
 	upstreams := make([]Upstream, 0, len(raw.Upstreams))
 	for name, u := range raw.Upstreams {
@@ -307,6 +313,7 @@ func resolve(raw fileSchema) (*File, error) {
 
 		up := Upstream{Name: name, Timeout: defaults.Timeout, Retry: defaults.Retry, DedupeWindow: defaults.DedupeWindow}
 		up.Limits = resolveLimits(prefix, defaults.Limits, u.RateLimit, u.Burst, u.MaxConcurrency, add)
+		up.Breaker = resolveBreaker(prefix+".breaker", defaults.Breaker, u.Breaker, add)
 
 		if base, err := parseBaseURL(u.BaseURL); err != nil {
 			add(prefix+".base_url", "%s", err)

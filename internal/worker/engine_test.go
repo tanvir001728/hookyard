@@ -15,6 +15,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/tanvir001728/hookyard/internal/breaker"
 	"github.com/tanvir001728/hookyard/internal/config"
 	"github.com/tanvir001728/hookyard/internal/flakyvendor"
 	"github.com/tanvir001728/hookyard/internal/model"
@@ -531,5 +532,90 @@ func TestTooManyRequestsPausesUpstream(t *testing.T) {
 	first, second := h.receivedAt("/first"), h.receivedAt("/second")
 	if gap := second[0].Sub(first[0]); gap < 900*time.Millisecond {
 		t.Errorf("a request to the same upstream went out %s after a 429 with Retry-After: 1", gap)
+	}
+}
+
+func breakerUpstream(cooldown time.Duration) config.Upstream {
+	return config.Upstream{
+		Name:    "flaky",
+		Timeout: 2 * time.Second,
+		Retry:   fastRetry,
+		Breaker: config.Breaker{Enabled: true, Config: breaker.Config{
+			FailureRate: 0.99, MinCalls: 1000, Window: time.Minute,
+			ConsecutiveFailures: 3, Cooldown: cooldown, Probes: 1,
+		}},
+	}
+}
+
+// tripBreaker sends three failing requests and waits until the breaker
+// records that it opened. It returns when it opened.
+func (h *harness) tripBreaker() time.Time {
+	h.t.Helper()
+	for range 3 {
+		h.enqueue("/down?status=503", func(in *store.NewRequest) { in.Retry.MaxAttempts = 1 })
+	}
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(5 * time.Millisecond) {
+		events, err := h.store.ListUpstreamEvents(context.Background(), "flaky", 1)
+		if err != nil {
+			h.t.Fatal(err)
+		}
+		if len(events) == 1 && events[0].Kind == "breaker_open" {
+			return events[0].At
+		}
+		if time.Now().After(deadline) {
+			h.t.Fatal("the breaker never opened")
+		}
+	}
+}
+
+func TestBreakerPausesAndRecovers(t *testing.T) {
+	t.Parallel()
+	h := newHarnessWith(t, breakerUpstream(600*time.Millisecond))
+	h.start(Config{})
+	trippedAt := h.tripBreaker()
+
+	// Requests enqueued while it's open wait for the cooldown, then a single
+	// probe goes out, succeeds and closes the breaker, and the rest follow.
+	var ids []string
+	for range 4 {
+		ids = append(ids, h.enqueue("/up").ID)
+	}
+	for _, id := range ids {
+		h.waitStatus(id, model.StatusSucceeded)
+	}
+	up := h.receivedAt("/up")
+	if first := up[0].Sub(trippedAt); first < 550*time.Millisecond {
+		t.Errorf("a request went out %s after the breaker opened; want the 600ms cooldown first", first)
+	}
+
+	events, err := h.store.ListUpstreamEvents(context.Background(), "flaky", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var kinds []string
+	for i := len(events) - 1; i >= 0; i-- {
+		kinds = append(kinds, events[i].Kind)
+	}
+	if got := strings.Join(kinds, ","); got != "breaker_open,breaker_half_open,breaker_closed" {
+		t.Errorf("breaker history = %s", got)
+	}
+}
+
+func TestPausedTimeDoesNotCountAgainstMaxAge(t *testing.T) {
+	t.Parallel()
+	h := newHarnessWith(t, breakerUpstream(1500*time.Millisecond))
+	h.start(Config{})
+
+	h.tripBreaker()
+
+	// A probe that will succeed, then a request with a 1s max_age that waits
+	// out a 1.5s pause, fails once, and must still be retried.
+	h.enqueue("/probe")
+	short := h.enqueue("/short?fail_first=1&key=short", func(in *store.NewRequest) {
+		in.Retry = model.RetryPolicy{MaxAttempts: 5, InitialInterval: 50 * time.Millisecond, MaxInterval: 100 * time.Millisecond, Multiplier: 2, MaxAge: time.Second}
+	})
+	done := h.waitStatus(short.ID, model.StatusSucceeded)
+	if done.AttemptCount != 2 {
+		t.Errorf("attempt_count = %d, want 2", done.AttemptCount)
 	}
 }

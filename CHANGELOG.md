@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A circuit breaker per upstream, on by default (`breaker`). When a vendor keeps failing, deliveries
+  to it pause instead of burning retries; after a cooldown a few probe requests decide whether to
+  resume. Paused time doesn't count against a request's `max_age`, and every transition is recorded
+  in the upstream's history.
 - Per-upstream rate limits (`rate_limit`, `burst`) and concurrency caps (`max_concurrency`). Requests
   over the limits wait in the queue without using up attempts, other upstreams are unaffected, and a
   `429` with `Retry-After` pauses all deliveries to that upstream until then. Limits appear in

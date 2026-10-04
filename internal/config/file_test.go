@@ -264,3 +264,47 @@ upstreams:
 		}
 	}
 }
+
+func TestParseFileBreaker(t *testing.T) {
+	src := `
+defaults:
+  breaker:
+    cooldown: 10s
+upstreams:
+  a:
+    base_url: http://a
+  b:
+    base_url: http://b
+    breaker: off
+  c:
+    base_url: http://c
+    breaker:
+      failure_rate: 0.25
+      probes: 1
+`
+	f, err := ParseFile([]byte(src), env(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, _ := f.Upstreams.Get("a")
+	b, _ := f.Upstreams.Get("b")
+	c, _ := f.Upstreams.Get("c")
+	if !a.Breaker.Enabled || a.Breaker.Cooldown != 10*time.Second || a.Breaker.FailureRate != 0.5 {
+		t.Errorf("a inherits defaults: %+v", a.Breaker)
+	}
+	if b.Breaker.Enabled {
+		t.Errorf("b turned the breaker off: %+v", b.Breaker)
+	}
+	if !c.Breaker.Enabled || c.Breaker.FailureRate != 0.25 || c.Breaker.Probes != 1 || c.Breaker.Cooldown != 10*time.Second {
+		t.Errorf("c overrides fields on top of defaults: %+v", c.Breaker)
+	}
+
+	_, err = ParseFile([]byte("upstreams:\n  a:\n    base_url: http://a\n    breaker:\n      failure_rat: 2\n"), env(nil))
+	if err == nil || !strings.Contains(err.Error(), `unknown breaker field "failure_rat"`) {
+		t.Errorf("typo: %v", err)
+	}
+	_, err = ParseFile([]byte("upstreams:\n  a:\n    base_url: http://a\n    breaker:\n      failure_rate: 2\n"), env(nil))
+	if err == nil || !strings.Contains(err.Error(), "upstreams.a.breaker.failure_rate") {
+		t.Errorf("range: %v", err)
+	}
+}
