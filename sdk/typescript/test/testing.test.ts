@@ -174,3 +174,21 @@ describe("parity with the real client", () => {
     expect(methods(real.to("x"))).toEqual(["delete", "get", "patch", "post", "put"]);
   });
 });
+
+describe("fake upstream pauses", () => {
+  it("pauses, resumes and records events like the server", async () => {
+    const fake = createFakeHookyard({ upstreams: ["courier-x"] });
+    const paused = await fake.upstreams.pause("courier-x", { reason: "maintenance", duration: "1h" });
+    expect(paused.state.status).toBe("paused");
+    expect(paused.state.pause?.reason).toBe("maintenance");
+    expect(paused.state.pause?.until).toBeInstanceOf(Date);
+
+    await expect(fake.upstreams.resume("courier-x")).resolves.toMatchObject({ state: { status: "active", pause: null } });
+    await expect(fake.upstreams.resume("courier-x")).rejects.toMatchObject({ code: "invalid_state" });
+    await expect(fake.upstreams.events("courier-x")).resolves.toMatchObject([{ kind: "resumed" }, { kind: "paused" }]);
+    await expect(fake.upstreams.pause("nope")).rejects.toMatchObject({ code: "not_found" });
+
+    fake.reset();
+    await expect(fake.upstreams.events("courier-x")).resolves.toEqual([]);
+  });
+});

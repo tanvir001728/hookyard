@@ -37,6 +37,8 @@ type V1 struct {
 	// Notify, if set, is called after a request is enqueued so delivery can
 	// start without waiting for the next poll.
 	Notify func()
+	// Monitor, if set, provides live upstream state and is told about pauses.
+	Monitor UpstreamMonitor
 }
 
 // WithDashboard serves the web dashboard h at / (for every path not handled
@@ -106,6 +108,9 @@ func (s *Server) routes() {
 		v1("POST /v1/dlq/replay", s.handleDLQReplay)
 		v1("GET /v1/upstreams", s.handleListUpstreams)
 		v1("GET /v1/upstreams/{name}", s.handleGetUpstream)
+		v1("POST /v1/upstreams/{name}/pause", s.handlePauseUpstream)
+		v1("POST /v1/upstreams/{name}/resume", s.handleResumeUpstream)
+		v1("GET /v1/upstreams/{name}/events", s.handleUpstreamEvents)
 		v1("GET /v1/stats/overview", s.handleStatsOverview)
 		v1("GET /v1/stats/timeseries", s.handleStatsTimeseries)
 

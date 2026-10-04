@@ -109,7 +109,7 @@ func TestMetricsHandler(t *testing.T) {
 	c.Observe(`we"ird`, time.Now(), 2*time.Second, model.OutcomeRetryableFailure, model.StatusDead)
 
 	gauges := func(context.Context) (map[string]QueueGauge, error) {
-		return map[string]QueueGauge{`we"ird`: {Waiting: 4, Dead: 1}}, nil
+		return map[string]QueueGauge{`we"ird`: {Waiting: 4, Dead: 1, BreakerOpen: 0.5, Paused: true}}, nil
 	}
 	rec := httptest.NewRecorder()
 	c.MetricsHandler(gauges).ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/metrics", nil))
@@ -127,6 +127,8 @@ func TestMetricsHandler(t *testing.T) {
 		`hookyard_attempt_duration_seconds_count{upstream="we\"ird"} 2`,
 		`hookyard_queue_waiting{upstream="we\"ird"} 4`,
 		`hookyard_dlq_size{upstream="we\"ird"} 1`,
+		`hookyard_upstream_breaker_open{upstream="we\"ird"} 0.5`,
+		`hookyard_upstream_paused{upstream="we\"ird"} 1`,
 		"# TYPE hookyard_attempt_duration_seconds histogram",
 	} {
 		if !strings.Contains(body, want) {

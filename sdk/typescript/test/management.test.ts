@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { InvalidStateError } from "../src/errors.js";
 import { client, json, mockFetch, wireRequest } from "./helpers.js";
 
 const retryWire = {
@@ -214,6 +215,7 @@ describe("upstreams", () => {
     retry: retryWire,
     header_names: ["Authorization"],
     limits: { rate_limit: "10/s", burst: 10, max_concurrency: null },
+    state: { status: "active", breaker: "closed", breaker_since: null, pause: null, in_flight: 1, available_tokens: 9, throttled_until: null },
   };
   const mapped = {
     name: "courier-x",
@@ -222,6 +224,7 @@ describe("upstreams", () => {
     retry: { preset: "quick", maxAttempts: 5, initialInterval: "1s", maxInterval: "30s", multiplier: 2, maxAge: "10m" },
     headerNames: ["Authorization"],
     limits: { rateLimit: "10/s", burst: 10, maxConcurrency: null },
+    state: { status: "active", breaker: "closed", breakerSince: null, pause: null, inFlight: 1, availableTokens: 9, throttledUntil: null },
   };
 
   it("list() returns the upstreams", async () => {
@@ -328,5 +331,57 @@ describe("stats", () => {
         },
       ],
     });
+  });
+});
+
+describe("upstream pause, resume and events", () => {
+  const stateWire = {
+    status: "paused",
+    breaker: "closed",
+    breaker_since: "2026-10-04T10:00:00Z",
+    pause: { since: "2026-10-04T10:00:00Z", until: null, reason: "maintenance", by: "ops" },
+    in_flight: 0,
+    available_tokens: 3,
+    throttled_until: null,
+  };
+  const upstreamWire = {
+    name: "courier-x",
+    base_url: "https://api.courier-x.example",
+    timeout: "15s",
+    retry: { preset: "quick", max_attempts: 5, initial_interval: "1s", max_interval: "30s", multiplier: 2, max_age: "10m" },
+    header_names: [],
+    limits: { rate_limit: null, burst: null, max_concurrency: null },
+    state: stateWire,
+  };
+
+  it("pause() sends the reason and duration and maps the state", async () => {
+    const { fetch, calls } = mockFetch(json(200, upstreamWire));
+    const up = await client(fetch).upstreams.pause("courier-x", { reason: "maintenance", duration: "2h" });
+    expect(calls[0]?.url.pathname).toBe("/v1/upstreams/courier-x/pause");
+    expect(calls[0]?.body).toEqual({ reason: "maintenance", duration: "2h" });
+    expect(up.state).toEqual({
+      status: "paused",
+      breaker: "closed",
+      breakerSince: new Date("2026-10-04T10:00:00Z"),
+      pause: { since: new Date("2026-10-04T10:00:00Z"), until: null, reason: "maintenance", by: "ops" },
+      inFlight: 0,
+      availableTokens: 3,
+      throttledUntil: null,
+    });
+  });
+
+  it("resume() is not retried, so a 409 surfaces as InvalidStateError", async () => {
+    const { fetch, calls } = mockFetch(json(409, { error: { code: "invalid_state", message: 'upstream "courier-x" is not paused' } }));
+    await expect(client(fetch).upstreams.resume("courier-x")).rejects.toBeInstanceOf(InvalidStateError);
+    expect(calls).toHaveLength(1);
+  });
+
+  it("events() maps timestamps", async () => {
+    const { fetch, calls } = mockFetch(
+      json(200, { data: [{ id: 2, at: "2026-10-04T10:05:00Z", kind: "breaker_open", reason: "5 consecutive failures", actor: "hookyard", details: {} }] }),
+    );
+    const events = await client(fetch).upstreams.events("courier-x", { limit: 5 });
+    expect(calls[0]?.url.search).toBe("?limit=5");
+    expect(events[0]).toEqual({ id: 2, at: new Date("2026-10-04T10:05:00Z"), kind: "breaker_open", reason: "5 consecutive failures", actor: "hookyard", details: {} });
   });
 });

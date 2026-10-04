@@ -88,3 +88,66 @@ func TestExtendRetryWindows(t *testing.T) {
 		t.Errorf("other upstream changed: %s", a)
 	}
 }
+
+func TestPauseAndResume(t *testing.T) {
+	t.Parallel()
+	s := storetest.New(t)
+	ctx := t.Context()
+
+	until := time.Now().Add(time.Hour).UTC().Truncate(time.Microsecond)
+	p, err := s.PauseUpstream(ctx, store.Pause{Upstream: "courier-x", Reason: "vendor maintenance", Until: &until, Actor: "ops"})
+	if err != nil || p.Actor != "ops" || !p.Until.Equal(until) {
+		t.Fatalf("pause: %+v %v", p, err)
+	}
+	// Pausing again updates the reason but keeps when it started.
+	again, err := s.PauseUpstream(ctx, store.Pause{Upstream: "courier-x", Reason: "still down", Actor: "ops2"})
+	if err != nil || !again.PausedAt.Equal(p.PausedAt) || again.Reason != "still down" || again.Until != nil {
+		t.Fatalf("re-pause: %+v %v", again, err)
+	}
+
+	pauses, err := s.ListPauses(ctx)
+	if err != nil || len(pauses) != 1 || pauses["courier-x"].Reason != "still down" {
+		t.Fatalf("pauses = %+v %v", pauses, err)
+	}
+
+	if ok, err := s.ResumeUpstream(ctx, "courier-x", "ops", "back up"); err != nil || !ok {
+		t.Fatalf("resume: %v %v", ok, err)
+	}
+	if ok, _ := s.ResumeUpstream(ctx, "courier-x", "ops", ""); ok {
+		t.Error("resuming an upstream that isn't paused reports false")
+	}
+
+	events, _ := s.ListUpstreamEvents(ctx, "courier-x", 10)
+	if len(events) != 3 || events[0].Kind != "resumed" || events[0].Actor != "ops" || events[2].Kind != "paused" {
+		t.Errorf("events = %+v", events)
+	}
+	audit, _ := s.ListAudit(ctx, "upstream", "courier-x", 10)
+	if len(audit) != 3 {
+		t.Errorf("audit entries = %d, want 3 (pause, pause, resume)", len(audit))
+	}
+}
+
+func TestResumeExpiredPauses(t *testing.T) {
+	t.Parallel()
+	s := storetest.New(t)
+	ctx := t.Context()
+
+	past := time.Now().Add(-time.Second)
+	future := time.Now().Add(time.Hour)
+	for name, until := range map[string]*time.Time{"ended": &past, "later": &future, "forever": nil} {
+		if _, err := s.PauseUpstream(ctx, store.Pause{Upstream: name, Until: until, Actor: "ops"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	resumed, err := s.ResumeExpiredPauses(ctx)
+	if err != nil || len(resumed) != 1 || resumed[0] != "ended" {
+		t.Fatalf("resumed = %v, err %v", resumed, err)
+	}
+	if again, _ := s.ResumeExpiredPauses(ctx); len(again) != 0 {
+		t.Errorf("an expired pause must be resumed only once: %v", again)
+	}
+	pauses, _ := s.ListPauses(ctx)
+	if len(pauses) != 2 {
+		t.Errorf("remaining pauses = %v", pauses)
+	}
+}

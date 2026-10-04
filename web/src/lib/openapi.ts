@@ -209,6 +209,78 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/upstreams/{name}/pause": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Upstream name. */
+                name: components["parameters"]["UpstreamName"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Pause deliveries to an upstream
+         * @description Requests to a paused upstream wait in the queue: they don't use up attempts, and the paused time
+         *     doesn't count against their `max_age`. The pause survives restarts. Set `until` or `duration`
+         *     to end it automatically; pausing again updates the reason and end time. Recorded in the audit
+         *     log and the upstream's events.
+         */
+        post: operations["pauseUpstream"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/upstreams/{name}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Upstream name. */
+                name: components["parameters"]["UpstreamName"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resume deliveries to a paused upstream
+         * @description Waiting requests are delivered again, with the paused time credited to their `max_age`.
+         */
+        post: operations["resumeUpstream"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/upstreams/{name}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Upstream name. */
+                name: components["parameters"]["UpstreamName"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Upstream history
+         * @description Circuit breaker transitions, pauses and resumes, newest first.
+         */
+        get: operations["listUpstreamEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/stats/overview": {
         parameters: {
             query?: never;
@@ -561,6 +633,62 @@ export interface components {
              */
             header_names: string[];
             limits: components["schemas"]["UpstreamLimits"];
+            state: components["schemas"]["UpstreamState"];
+        };
+        /** @description Live delivery state of the upstream on the Hookyard instance that answered. */
+        UpstreamState: {
+            /**
+             * @description - `active`: deliveries flow normally
+             *     - `paused`: paused by an operator (see `pause`)
+             *     - `breaker_open`: the circuit breaker opened after failures; deliveries wait
+             *     - `breaker_half_open`: probe requests are deciding whether to resume
+             *     - `throttled`: held back after the upstream answered `429` with `Retry-After`
+             * @enum {string}
+             */
+            status: "active" | "paused" | "breaker_open" | "breaker_half_open" | "throttled";
+            /** @enum {string} */
+            breaker: "closed" | "open" | "half_open" | "off";
+            /**
+             * Format: date-time
+             * @description When the breaker entered its current state.
+             */
+            breaker_since: string | null;
+            pause: components["schemas"]["UpstreamPause"] | null;
+            /** @description Deliveries to this upstream in progress right now. */
+            in_flight: number;
+            /** @description Requests the rate limit allows right now, or `null` without a rate limit. */
+            available_tokens: number | null;
+            /** Format: date-time */
+            throttled_until: string | null;
+        };
+        UpstreamPause: {
+            /** Format: date-time */
+            since: string;
+            /**
+             * Format: date-time
+             * @description When the pause ends on its own, or `null` until resumed.
+             */
+            until: string | null;
+            reason: string;
+            /** @description Name of the API token that paused it. */
+            by: string;
+        };
+        UpstreamEvent: {
+            id: number;
+            /** Format: date-time */
+            at: string;
+            /**
+             * @description `breaker_open`, `breaker_half_open`, `breaker_closed`, `paused` or `resumed`.
+             * @example breaker_open
+             */
+            kind: string;
+            /** @example 5 consecutive failures */
+            reason: string;
+            /** @description `hookyard` for automatic changes, otherwise the API token name. */
+            actor: string;
+            details: {
+                [key: string]: unknown;
+            };
         };
         /**
          * @description Throttling for deliveries to this upstream, applied by each Hookyard instance. Requests over
@@ -782,6 +910,8 @@ export interface components {
         };
     };
     parameters: {
+        /** @description Upstream name. */
+        UpstreamName: components["schemas"]["UpstreamName"];
         /** @description Request ID. */
         RequestId: components["schemas"]["RequestId"];
         /** @description Only include this upstream. */
@@ -1096,6 +1226,116 @@ export interface operations {
                     "application/json": components["schemas"]["Upstream"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            default: components["responses"]["InternalError"];
+        };
+    };
+    pauseUpstream: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Upstream name. */
+                name: components["parameters"]["UpstreamName"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                /**
+                 * @example {
+                 *       "reason": "Vendor maintenance window",
+                 *       "duration": "2h"
+                 *     }
+                 */
+                "application/json": {
+                    reason?: string;
+                    /**
+                     * Format: date-time
+                     * @description End the pause at this time (at most 30 days ahead).
+                     */
+                    until?: string;
+                    duration?: components["schemas"]["Duration"];
+                };
+            };
+        };
+        responses: {
+            /** @description The upstream, now paused. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Upstream"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["UnprocessableEntity"];
+            default: components["responses"]["InternalError"];
+        };
+    };
+    resumeUpstream: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Upstream name. */
+                name: components["parameters"]["UpstreamName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    reason?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The upstream, resumed. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Upstream"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            default: components["responses"]["InternalError"];
+        };
+    };
+    listUpstreamEvents: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                /** @description Upstream name. */
+                name: components["parameters"]["UpstreamName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Events, newest first. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["UpstreamEvent"][];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             default: components["responses"]["InternalError"];

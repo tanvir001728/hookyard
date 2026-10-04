@@ -274,6 +274,59 @@ export interface Upstream {
   headerNames: string[];
   /** Throttling applied by each Hookyard instance; requests over the limits wait in the queue. */
   limits: UpstreamLimits;
+  /** Live delivery state on the Hookyard instance that answered. */
+  state: UpstreamState;
+}
+
+/**
+ * - `active`: deliveries flow normally
+ * - `paused`: paused by an operator (see `pause`)
+ * - `breaker_open`: the circuit breaker opened after failures; deliveries wait
+ * - `breaker_half_open`: probe requests are deciding whether to resume
+ * - `throttled`: held back after a `429` with `Retry-After`
+ */
+export type UpstreamStatus = "active" | "paused" | "breaker_open" | "breaker_half_open" | "throttled";
+
+export interface UpstreamState {
+  status: UpstreamStatus;
+  breaker: "closed" | "open" | "half_open" | "off";
+  /** When the breaker entered its current state. */
+  breakerSince: Date | null;
+  pause: UpstreamPause | null;
+  /** Deliveries in progress right now. */
+  inFlight: number;
+  /** Requests the rate limit allows right now, or `null` without a rate limit. */
+  availableTokens: number | null;
+  throttledUntil: Date | null;
+}
+
+export interface UpstreamPause {
+  since: Date;
+  /** When the pause ends on its own, or `null` until resumed. */
+  until: Date | null;
+  reason: string;
+  /** Name of the API token that paused it. */
+  by: string;
+}
+
+export interface PauseOptions {
+  reason?: string | undefined;
+  /** End the pause at this time (at most 30 days ahead). */
+  until?: Timestamp | undefined;
+  /** End the pause after this long, such as `"2h"`. Use `until` or `duration`, not both. */
+  duration?: Duration | undefined;
+}
+
+/** A circuit breaker transition, pause or resume. */
+export interface UpstreamEvent {
+  id: number;
+  at: Date;
+  /** `breaker_open`, `breaker_half_open`, `breaker_closed`, `paused` or `resumed`. */
+  kind: string;
+  reason: string;
+  /** `hookyard` for automatic changes, otherwise the API token name. */
+  actor: string;
+  details: Record<string, unknown>;
 }
 
 export interface UpstreamLimits {
@@ -386,6 +439,15 @@ export interface UpstreamsApi {
   /** All configured upstreams, sorted by name. */
   list(): Promise<Upstream[]>;
   get(name: string): Promise<Upstream>;
+  /**
+   * Pauses deliveries to an upstream. Requests wait in the queue without using up attempts, and the
+   * paused time doesn't count against their `max_age`.
+   */
+  pause(name: string, options?: PauseOptions): Promise<Upstream>;
+  /** Resumes a paused upstream. Throws `InvalidStateError` if it isn't paused. */
+  resume(name: string, options?: { reason?: string | undefined }): Promise<Upstream>;
+  /** Breaker transitions, pauses and resumes, newest first. */
+  events(name: string, options?: { limit?: number | undefined }): Promise<UpstreamEvent[]>;
 }
 
 export interface StatsApi {

@@ -168,6 +168,23 @@ describe.skipIf(!live)("contract: live Hookyard server", () => {
     await expect(hy.upstreams.get("nope")).rejects.toBeInstanceOf(NotFoundError);
   });
 
+  it("pauses and resumes an upstream", async () => {
+    const paused = await hy.upstreams.pause("flaky", { reason: `contract ${run}`, duration: "10m" });
+    expect(paused.state).toMatchObject({ status: "paused", pause: { reason: `contract ${run}` } });
+    try {
+      const job = await flaky().post("/orders", { orderId: 9 }, { tags: { run, kind: "paused" } });
+      // Paused: the request waits instead of being delivered.
+      await new Promise((r) => setTimeout(r, 1500));
+      expect((await job.refresh()).status).toBe("pending");
+      await hy.upstreams.resume("flaky", { reason: "contract done" });
+      await expect(job.result({ timeout: "20s" })).resolves.toMatchObject({ status: "succeeded" });
+    } finally {
+      await hy.upstreams.resume("flaky").catch(() => undefined);
+    }
+    const events = await hy.upstreams.events("flaky", { limit: 5 });
+    expect(events.map((e) => e.kind)).toEqual(expect.arrayContaining(["paused", "resumed"]));
+  });
+
   it("returns stats", async () => {
     // The server flushes metrics every 10 seconds, so wait for this run's deliveries to show up.
     const deadline = Date.now() + 30_000;

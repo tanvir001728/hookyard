@@ -56,6 +56,8 @@ With `HOOKYARD_METRICS=true`, `/metrics` serves (unauthenticated, so keep it on 
 | `hookyard_attempt_duration_seconds` | histogram | `upstream` |
 | `hookyard_queue_waiting` | gauge | `upstream` |
 | `hookyard_dlq_size` | gauge | `upstream` |
+| `hookyard_upstream_breaker_open` | gauge (1 open, 0.5 half-open, 0 closed) | `upstream` |
+| `hookyard_upstream_paused` | gauge (1 while paused) | `upstream` |
 
 The dashboard and `/v1/stats` don't need Prometheus: they read per-minute rollups that Hookyard keeps in
 Postgres.
@@ -184,6 +186,25 @@ upstreams:
 
 Every transition is logged and kept in the upstream's history. Breaker state is per Hookyard
 instance.
+
+### Pausing an upstream
+
+During a vendor's maintenance window, or while you investigate an incident, pause deliveries to an
+upstream. Requests wait in the queue with the same guarantees as an open breaker. A pause is stored in
+the database, so it survives restarts and applies to every Hookyard instance:
+
+```sh
+curl -X POST localhost:8080/v1/upstreams/courier-x/pause \
+  -H "Authorization: Bearer $HOOKYARD_TOKEN" \
+  -d '{"reason":"vendor maintenance","duration":"2h"}'      # or "until": "2026-10-05T03:00:00Z"
+
+curl -X POST localhost:8080/v1/upstreams/courier-x/resume -H "Authorization: Bearer $HOOKYARD_TOKEN"
+```
+
+With the SDK: `hy.upstreams.pause("courier-x", { reason, duration: "2h" })` and
+`hy.upstreams.resume("courier-x")`. A pause with an end time resumes on its own. `GET /v1/upstreams`
+shows each upstream's live state (breaker, pause, in-flight deliveries, rate-limit tokens), and
+`GET /v1/upstreams/{name}/events` its history. Pauses and resumes are recorded in the audit log.
 
 ### Retry policies
 

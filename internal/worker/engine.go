@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/tanvir001728/hookyard/internal/breaker"
@@ -69,7 +70,15 @@ type Engine struct {
 	limits    *limiter
 	wake      chan struct{}
 	now       func() time.Time
+
+	// pausesChanged asks the loop to reload operator pauses now.
+	pausesChanged atomic.Bool
+	pausesLoaded  time.Time
 }
+
+// pauseRefresh is how often operator pauses are reloaded from the database,
+// which also picks up pauses made by other instances and ends expired ones.
+const pauseRefresh = time.Second
 
 // New returns an engine. Call Run to start delivering.
 func New(log *slog.Logger, st *store.Store, upstreams *config.Registry, cfg Config) *Engine {
@@ -118,6 +127,7 @@ func (e *Engine) Run(ctx context.Context) error {
 	}()
 
 	for ctx.Err() == nil {
+		e.refreshPauses(ctx)
 		free := cap(slots) - len(slots)
 		claimed := 0
 		if free > 0 {
@@ -246,4 +256,47 @@ func (e *Engine) applyTransitions(ctx context.Context, changes ...transition) {
 			e.Notify()
 		}
 	}
+}
+
+// UpstreamsChanged tells the engine that an upstream was paused or resumed,
+// so it reloads pauses right away. It never blocks.
+func (e *Engine) UpstreamsChanged() {
+	e.pausesChanged.Store(true)
+	e.Notify()
+}
+
+// UpstreamLive returns an upstream's live delivery state in this process.
+func (e *Engine) UpstreamLive(name string) (model.UpstreamLive, bool) {
+	return e.limits.live(name, e.now())
+}
+
+// refreshPauses reloads operator pauses when they may have changed, and ends
+// pauses whose time is up.
+func (e *Engine) refreshPauses(ctx context.Context) {
+	now := e.now()
+	if !e.pausesChanged.Swap(false) && now.Sub(e.pausesLoaded) < pauseRefresh {
+		return
+	}
+	e.pausesLoaded = now
+
+	resumed, err := e.store.ResumeExpiredPauses(ctx)
+	if err != nil && ctx.Err() == nil {
+		e.log.Error("ending expired pauses failed", "error", err)
+	}
+	for _, u := range resumed {
+		e.log.Info("pause ended; deliveries resume", "upstream", u)
+	}
+
+	pauses, err := e.store.ListPauses(ctx)
+	if err != nil {
+		if ctx.Err() == nil {
+			e.log.Error("loading paused upstreams failed", "error", err)
+		}
+		return
+	}
+	paused := make(map[string]bool, len(pauses))
+	for name := range pauses {
+		paused[name] = true
+	}
+	e.limits.setPaused(paused)
 }

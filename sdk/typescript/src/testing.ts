@@ -8,6 +8,7 @@
  * @module
  */
 import { iteratePages } from "./client.js";
+import { toMilliseconds, toWireTimestamp } from "./duration.js";
 import { toWireCreateRequest } from "./mappers.js";
 import type { WireCreateRequest } from "./mappers.js";
 import { InvalidStateError, NotFoundError, UnknownUpstreamError, ValidationError } from "./errors.js";
@@ -29,6 +30,8 @@ import type {
   RetryPreset,
   SendInput,
   Upstream,
+  UpstreamEvent,
+  UpstreamPause,
   UpstreamStats,
 } from "./types.js";
 import { createUpstreamClient } from "./upstream.js";
@@ -279,20 +282,46 @@ export function createFakeHookyard(options: FakeHookyardOptions = {}): FakeHooky
   const upstreamNames = (): string[] =>
     [...new Set([...(options.upstreams ?? []), ...[...store.values()].map((e) => e.request.upstream)])].sort();
 
-  const upstream = (name: string): Upstream => ({
-    name,
-    baseUrl: `https://${name}.invalid`,
-    timeout: DEFAULT_TIMEOUT,
-    retry: { ...PRESETS.standard },
-    headerNames: [],
-    limits: { rateLimit: null, burst: null, maxConcurrency: null },
-  });
+  const pauses = new Map<string, UpstreamPause>();
+  const events = new Map<string, UpstreamEvent[]>();
+  const addEvent = (name: string, kind: string, reason: string) => {
+    const list = events.get(name) ?? [];
+    list.unshift({ id: list.length + 1, at: new Date(), kind, reason, actor: "fake", details: {} });
+    events.set(name, list);
+  };
+  const upstream = (name: string): Upstream => {
+    const pause = pauses.get(name) ?? null;
+    return {
+      name,
+      baseUrl: `https://${name}.invalid`,
+      timeout: DEFAULT_TIMEOUT,
+      retry: { ...PRESETS.standard },
+      headerNames: [],
+      limits: { rateLimit: null, burst: null, maxConcurrency: null },
+      state: {
+        status: pause ? "paused" : "active",
+        breaker: "closed",
+        breakerSince: null,
+        pause,
+        inFlight: 0,
+        availableTokens: null,
+        throttledUntil: null,
+      },
+    };
+  };
+  const knownUpstream = (name: string): void => {
+    if (!upstreamNames().includes(name)) {
+      throw new NotFoundError(`Not found: upstream "${name}" is not configured`, { status: 404, code: "not_found" });
+    }
+  };
 
   const fake: FakeHookyard = {
     sent,
     reset() {
       sent.length = 0;
       store.clear();
+      pauses.clear();
+      events.clear();
       counter = 0;
     },
     to: (name) => createUpstreamClient(send, name),
@@ -384,10 +413,29 @@ export function createFakeHookyard(options: FakeHookyardOptions = {}): FakeHooky
         return upstreamNames().map(upstream);
       },
       async get(name) {
-        if (!upstreamNames().includes(name)) {
-          throw new NotFoundError(`Not found: upstream "${name}" is not configured`, { status: 404, code: "not_found" });
-        }
+        knownUpstream(name);
         return upstream(name);
+      },
+      async pause(name, options = {}) {
+        knownUpstream(name);
+        let until: Date | null = null;
+        if (options.until !== undefined) until = new Date(toWireTimestamp(options.until, "until"));
+        if (options.duration !== undefined) until = new Date(Date.now() + toMilliseconds(options.duration, "duration"));
+        pauses.set(name, { since: pauses.get(name)?.since ?? new Date(), until, reason: options.reason ?? "", by: "fake" });
+        addEvent(name, "paused", options.reason ?? "");
+        return upstream(name);
+      },
+      async resume(name, options = {}) {
+        knownUpstream(name);
+        if (!pauses.delete(name)) {
+          throw new InvalidStateError(`Conflict: upstream "${name}" is not paused`, { status: 409, code: "invalid_state" });
+        }
+        addEvent(name, "resumed", options.reason ?? "");
+        return upstream(name);
+      },
+      async events(name, { limit = 50 } = {}) {
+        knownUpstream(name);
+        return (events.get(name) ?? []).slice(0, limit);
       },
     },
     stats: {

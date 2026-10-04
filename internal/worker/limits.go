@@ -6,6 +6,7 @@ import (
 
 	"github.com/tanvir001728/hookyard/internal/breaker"
 	"github.com/tanvir001728/hookyard/internal/config"
+	"github.com/tanvir001728/hookyard/internal/model"
 	"github.com/tanvir001728/hookyard/internal/ratelimit"
 )
 
@@ -25,6 +26,8 @@ type upstreamLimits struct {
 	// held keeps a just-closed breaker's upstream out of claims until the
 	// paused time has been credited to its waiting requests.
 	held bool
+	// paused is set while an operator has paused the upstream.
+	paused bool
 }
 
 func newLimiter(reg *config.Registry, now time.Time) *limiter {
@@ -56,7 +59,7 @@ func (l *limiter) allowance(now time.Time) (exclude []string, caps map[string]in
 	defer l.mu.Unlock()
 	caps = map[string]int{}
 	for name, u := range l.upstreams {
-		if u.held || now.Before(u.blockedUntil) {
+		if u.held || u.paused || now.Before(u.blockedUntil) {
 			exclude = append(exclude, name)
 			continue
 		}
@@ -181,4 +184,38 @@ func (l *limiter) nextChange(now time.Time) time.Time {
 		}
 	}
 	return next
+}
+
+// setPaused marks exactly the given upstreams as paused by an operator.
+func (l *limiter) setPaused(paused map[string]bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for name, u := range l.upstreams {
+		u.paused = paused[name]
+	}
+}
+
+// live returns an upstream's live state, and false if it isn't configured.
+func (l *limiter) live(upstream string, now time.Time) (model.UpstreamLive, bool) {
+	l.mu.Lock()
+	u := l.upstreams[upstream]
+	l.mu.Unlock()
+	if u == nil {
+		return model.UpstreamLive{}, false
+	}
+	out := model.UpstreamLive{Breaker: "off", Tokens: -1}
+	if u.breaker != nil {
+		state, since, _ := u.breaker.State(now)
+		out.Breaker, out.BreakerSince = string(state), since
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	out.InFlight = u.inFlight
+	if u.bucket != nil {
+		out.Tokens = u.bucket.Available(now)
+	}
+	if now.Before(u.blockedUntil) {
+		out.ThrottledUntil = u.blockedUntil
+	}
+	return out, true
 }

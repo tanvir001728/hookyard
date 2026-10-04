@@ -13,10 +13,14 @@ import (
 // QueueGauges reports live queue sizes per upstream for the metrics endpoint.
 type QueueGauges func(ctx context.Context) (map[string]QueueGauge, error)
 
-// QueueGauge is the live queue state of one upstream.
+// QueueGauge is the live state of one upstream.
 type QueueGauge struct {
 	Waiting int64
 	Dead    int64
+	// BreakerOpen is 1 while the circuit breaker is open, 0.5 while
+	// half-open and 0 otherwise.
+	BreakerOpen float64
+	Paused      bool
 }
 
 // MetricsHandler serves process-lifetime delivery metrics in the Prometheus
@@ -89,6 +93,18 @@ func writeGauges(w io.Writer, g map[string]QueueGauge) {
 	fmt.Fprint(w, "# HELP hookyard_dlq_size Requests in the dead-letter queue.\n# TYPE hookyard_dlq_size gauge\n")
 	for _, u := range upstreams {
 		fmt.Fprintf(w, "hookyard_dlq_size{upstream=%s} %d\n", quote(u), g[u].Dead)
+	}
+	fmt.Fprint(w, "# HELP hookyard_upstream_breaker_open Circuit breaker state: 1 open, 0.5 half-open, 0 closed.\n# TYPE hookyard_upstream_breaker_open gauge\n")
+	for _, u := range upstreams {
+		fmt.Fprintf(w, "hookyard_upstream_breaker_open{upstream=%s} %s\n", quote(u), strconv.FormatFloat(g[u].BreakerOpen, 'f', -1, 64))
+	}
+	fmt.Fprint(w, "# HELP hookyard_upstream_paused 1 while an operator has paused the upstream.\n# TYPE hookyard_upstream_paused gauge\n")
+	for _, u := range upstreams {
+		paused := 0
+		if g[u].Paused {
+			paused = 1
+		}
+		fmt.Fprintf(w, "hookyard_upstream_paused{upstream=%s} %d\n", quote(u), paused)
 	}
 }
 
