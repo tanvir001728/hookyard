@@ -93,6 +93,7 @@ export function fromWireAttempt(a: Schemas["Attempt"]): Attempt {
         ? null
         : { headers: a.response.headers, body: a.response.body, bodyTruncated: a.response.body_truncated },
     retryAt: optionalDate(a.retry_at),
+    classifiedBy: a.classified_by ?? null,
   };
 }
 

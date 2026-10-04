@@ -87,6 +87,11 @@ function AttemptItem({ attempt, last }: { attempt: Attempt; last: boolean }) {
         </span>
       </div>
       {attempt.error && <p className="mt-1 text-sm">{attempt.error.message}</p>}
+      {attempt.classified_by && (
+        <p className="mt-1 text-xs text-muted-foreground">
+          Classified by the upstream's rule <span className="font-medium text-foreground">{attempt.classified_by}</span>
+        </p>
+      )}
       {attempt.retry_at && (
         <p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
           <Clock className="size-3.5" aria-hidden />

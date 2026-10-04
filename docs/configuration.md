@@ -130,6 +130,7 @@ Names use lowercase letters, digits, `-` and `_`. Applications refer to upstream
 | `burst` | no | Requests sent at once after a quiet period (default: one second's worth, at least 1) |
 | `max_concurrency` | no | Maximum deliveries in flight to this upstream (1–1024) |
 | `breaker` | no | Circuit breaker settings, or `off` |
+| `classify` | no | Rules that decide how responses count (see below) |
 | `headers` | no | Headers added to every request, typically credentials. Values are never returned by the API. `Host`, `Content-Length` and hop-by-hop headers can't be set. |
 
 ### Rate limits and concurrency
@@ -186,6 +187,44 @@ upstreams:
 
 Every transition is logged and kept in the upstream's history. Breaker state is per Hookyard
 instance.
+
+### Classifying responses
+
+By default `2xx` is a success, network errors, timeouts, `408`, `425`, `429` and `5xx` are retried,
+and other responses are permanent failures. Many partner APIs don't follow that: they answer `200 OK`
+with an error in the body, or use `4xx` for temporary problems. Add `classify` rules to an upstream;
+**the first rule that matches decides**, and responses no rule matches use the defaults.
+
+```yaml
+upstreams:
+  courier-x:
+    base_url: https://api.courier-x.example
+    classify:
+      - name: fake success          # optional; shown on attempts in the API and dashboard
+        status: 200
+        body: status                # dot path into the JSON body, e.g. error.code or items.0.state
+        equals: FAILED
+        then: retry                 # success | retry | fail
+      - status: 409                 # "already exists" means the earlier attempt went through
+        then: success
+      - status: 4xx
+        body: error.code
+        in: [busy, try_later]
+        then: retry
+```
+
+| Key | Meaning |
+| --- | --- |
+| `status` | A code (`200`), a class (`4xx`), a range (`500-599`) or a list of those |
+| `body` | A dot path into the JSON response body |
+| `equals` / `not_equals` | The value at `body` must (not) equal this string, number, boolean or null |
+| `in` | The value at `body` must be one of these |
+| `exists` | `true` if `body` must exist, `false` if it must not |
+| `then` | `success`, `retry` (retryable failure) or `fail` (permanent failure) |
+
+A rule needs `status`, `body` or both. With `body`, it needs exactly one of `equals`, `not_equals`,
+`in` or `exists`, and it only matches JSON responses. When a rule turns a `2xx` into a failure, the
+attempt's error code is `classified_failure`. The rule's outcome also counts for the circuit breaker.
 
 ### Pausing an upstream
 

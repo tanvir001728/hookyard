@@ -17,6 +17,8 @@ export function reasonLabel(errorCode: string, statusCode: number | null | undef
   switch (errorCode) {
     case "http_status":
       return statusCode ? `HTTP ${statusCode}` : "HTTP error";
+    case "classified_failure":
+      return "Failure reported in response";
     case "timeout":
       return "Timed out";
     case "connection":

@@ -135,6 +135,7 @@ export type DeliveryErrorCode =
   | "timeout"
   | "connection"
   | "http_status"
+  | "classified_failure"
   | "max_age_exceeded"
   | "canceled"
   | "internal";
@@ -196,6 +197,8 @@ export interface Attempt {
   response: AttemptResponse | null;
   /** When the next attempt was scheduled after this one failed, if any. */
   retryAt: Date | null;
+  /** The upstream's classification rule that decided the outcome, or `null` for the default rules. */
+  classifiedBy: string | null;
 }
 
 /** Filters for {@link RequestsApi.list}. All filters are combined with AND. */

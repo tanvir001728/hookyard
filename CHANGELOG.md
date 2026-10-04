@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Response classification rules per upstream (`classify`): match on status code and a value in the
+  JSON body to decide whether a response is a success, a retryable failure or a permanent failure,
+  for vendors that report errors inside `200 OK`. Attempts show which rule decided, and such failures
+  use the new `classified_failure` error code.
 - Pause and resume upstreams (`POST /v1/upstreams/{name}/pause` and `/resume`, or the SDK), with a
   reason and an optional end time. Pauses survive restarts and are audit-logged. `GET /v1/upstreams`
   now includes each upstream's live state, `GET /v1/upstreams/{name}/events` its history, and

@@ -45,7 +45,16 @@ type AttemptResult struct {
 	StatusCode int // 0 if no response was received
 	Headers    http.Header
 	Error      *model.DeliveryError
+	// Outcome, when set, was decided by a classification rule and replaces
+	// the default status-code classification.
+	Outcome model.AttemptOutcome
+	// Rule names the classification rule that decided Outcome.
+	Rule string
 }
+
+// ErrCodeClassifiedFailure marks a response that a classification rule
+// turned into a failure even though its status code meant success.
+const ErrCodeClassifiedFailure = "classified_failure"
 
 // deliver makes one attempt for a claimed request and records the outcome.
 func (e *Engine) deliver(ctx context.Context, c store.Claim) {
@@ -76,6 +85,8 @@ func (e *Engine) deliver(ctx context.Context, c store.Claim) {
 		Error:     result.Error,
 		Response:  resp,
 		RetryAt:   d.RetryAt,
+		// The rule that decided the outcome, if any.
+		ClassifiedBy: result.Rule,
 	}
 	if result.StatusCode != 0 {
 		attempt.StatusCode = &result.StatusCode
@@ -186,6 +197,22 @@ func (e *Engine) send(ctx context.Context, req model.Request, attempt int) (Atte
 		result.Error = &model.DeliveryError{
 			Code:    ErrCodeHTTPStatus,
 			Message: fmt.Sprintf("upstream responded with %d %s", resp.StatusCode, http.StatusText(resp.StatusCode)),
+		}
+	}
+	if outcome, rule, ok := up.Classify.Classify(resp.StatusCode, data[:min(len(data), MaxResponseBody)]); ok {
+		result.Outcome, result.Rule = outcome, rule
+		switch {
+		case outcome == model.OutcomeSuccess:
+			result.Error = nil
+		case result.Error == nil:
+			kind := "a retryable failure"
+			if outcome == model.OutcomePermanentFailure {
+				kind = "a permanent failure"
+			}
+			result.Error = &model.DeliveryError{
+				Code:    ErrCodeClassifiedFailure,
+				Message: fmt.Sprintf("upstream responded with %d, but rule %q classified it as %s", resp.StatusCode, rule, kind),
+			}
 		}
 	}
 	return result, stored

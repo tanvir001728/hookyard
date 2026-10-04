@@ -5,6 +5,7 @@ it.each([
   ["http_status", 503, "HTTP 503"],
   ["http_status", null, "HTTP error"],
   ["timeout", null, "Timed out"],
+  ["classified_failure", 200, "Failure reported in response"],
   ["connection", null, "Connection failed"],
   ["max_age_exceeded", null, "Retry budget (max age) ran out"],
   ["internal", null, "Internal error"],

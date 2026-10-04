@@ -536,12 +536,14 @@ export interface components {
          * @description - `timeout`: no response within the attempt timeout
          *     - `connection`: DNS, TCP or TLS failure
          *     - `http_status`: the upstream responded with a status classified as a failure
+         *     - `classified_failure`: the status meant success, but a classification rule matched the
+         *       response (for example `"status": "FAILED"` in a `200` body) and counted it as a failure
          *     - `max_age_exceeded`: the request's `max_age` passed before it could be delivered
          *     - `canceled`: the request was canceled
          *     - `internal`: an unexpected error inside Hookyard
          * @enum {string}
          */
-        DeliveryErrorCode: "timeout" | "connection" | "http_status" | "max_age_exceeded" | "canceled" | "internal";
+        DeliveryErrorCode: "timeout" | "connection" | "http_status" | "classified_failure" | "max_age_exceeded" | "canceled" | "internal";
         DeliveryError: {
             code: components["schemas"]["DeliveryErrorCode"];
             /** @example upstream responded with 503 Service Unavailable */
@@ -566,6 +568,12 @@ export interface components {
              * @description When the next attempt was scheduled after this one failed, if any.
              */
             retry_at?: string | null;
+            /**
+             * @description The upstream's classification rule that decided this attempt's outcome, or `null` when the
+             *     default status-code rules applied.
+             * @example fake success
+             */
+            classified_by?: string | null;
         };
         AttemptResponse: {
             headers: components["schemas"]["Headers"];

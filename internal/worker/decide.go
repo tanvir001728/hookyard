@@ -33,6 +33,8 @@ func PolicyDecider(rnd func() float64) Decider {
 	return func(req model.Request, attempt int, res AttemptResult, now time.Time) Decision {
 		outcome := model.OutcomeSuccess
 		switch {
+		case res.Outcome != "":
+			outcome = res.Outcome // decided by a classification rule
 		case res.StatusCode != 0:
 			outcome = retry.Classify(res.StatusCode)
 		case res.Error != nil:

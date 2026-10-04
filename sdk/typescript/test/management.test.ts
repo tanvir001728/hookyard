@@ -88,6 +88,7 @@ describe("requests", () => {
             error: { code: "http_status", message: "upstream responded with 503 Service Unavailable" },
             response: { headers: { "Retry-After": "1" }, body: "busy", body_truncated: false },
             retry_at: "2026-09-29T10:00:01Z",
+            classified_by: "fake success",
           },
           {
             number: 2,
@@ -98,6 +99,7 @@ describe("requests", () => {
             error: { code: "connection", message: "connection refused" },
             response: null,
             retry_at: null,
+            classified_by: null,
           },
         ],
       }),
@@ -114,6 +116,7 @@ describe("requests", () => {
         error: { code: "http_status", message: "upstream responded with 503 Service Unavailable" },
         response: { headers: { "Retry-After": "1" }, body: "busy", bodyTruncated: false },
         retryAt: new Date("2026-09-29T10:00:01Z"),
+        classifiedBy: "fake success",
       },
       {
         number: 2,
@@ -124,6 +127,7 @@ describe("requests", () => {
         error: { code: "connection", message: "connection refused" },
         response: null,
         retryAt: null,
+        classifiedBy: null,
       },
     ]);
   });

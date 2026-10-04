@@ -308,3 +308,78 @@ upstreams:
 		t.Errorf("range: %v", err)
 	}
 }
+
+func TestParseFileClassify(t *testing.T) {
+	src := `
+upstreams:
+  a:
+    base_url: http://a
+    classify:
+      - name: fake success
+        status: 200
+        body: status
+        equals: FAILED
+        then: retry
+      - status: [409, 5xx]
+        then: success
+      - body: error.retryable
+        equals: true
+        then: retry
+`
+	f, err := ParseFile([]byte(src), env(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, _ := f.Upstreams.Get("a")
+	if len(a.Classify) != 3 {
+		t.Fatalf("rules = %+v", a.Classify)
+	}
+	if out, label, ok := a.Classify.Classify(200, []byte(`{"status":"FAILED"}`)); !ok || label != "fake success" || out != "retryable_failure" {
+		t.Errorf("rule 1: %v %v %v", out, label, ok)
+	}
+	if out, _, ok := a.Classify.Classify(503, nil); !ok || out != "success" {
+		t.Errorf("rule 2 list: %v %v", out, ok)
+	}
+	if out, _, ok := a.Classify.Classify(400, []byte(`{"error":{"retryable":true}}`)); !ok || out != "retryable_failure" {
+		t.Errorf("rule 3 bool: %v %v", out, ok)
+	}
+}
+
+func TestParseFileClassifyErrors(t *testing.T) {
+	src := `
+upstreams:
+  a:
+    base_url: http://a
+    classify:
+      - status: 200
+        then: maybe
+      - status: 7xx
+        then: retry
+      - body: status
+        then: retry
+      - equals: x
+        then: retry
+      - then: retry
+      - body: status
+        equals: [1, 2]
+        then: fail
+`
+	_, err := ParseFile([]byte(src), env(nil))
+	for _, want := range []string{
+		"upstreams.a.classify[0].then: then must be success, retry or fail",
+		"upstreams.a.classify[1].status: invalid status",
+		"upstreams.a.classify[2]: a rule with body needs exactly one of",
+		"upstreams.a.classify[3].body: is required with equals",
+		"upstreams.a.classify[4]: needs status, body, or both",
+		"upstreams.a.classify[5].equals: must be a single value",
+	} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("error should mention %q:\n%v", want, err)
+		}
+	}
+
+	_, err = ParseFile([]byte("upstreams:\n  a:\n    base_url: http://a\n    classify:\n      - stauts: 200\n        then: retry\n"), env(nil))
+	if err == nil || !strings.Contains(err.Error(), `unknown key "stauts" in upstreams.a.classify[0]`) {
+		t.Errorf("typo inside a list item must be caught: %v", err)
+	}
+}
