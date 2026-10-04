@@ -15,6 +15,7 @@ import (
 	"go.yaml.in/yaml/v3"
 
 	"github.com/tanvir001728/hookyard/internal/model"
+	"github.com/tanvir001728/hookyard/internal/ratelimit"
 	"github.com/tanvir001728/hookyard/internal/retry"
 )
 
@@ -37,17 +38,23 @@ type fileSchema struct {
 }
 
 type defaultsSchema struct {
-	Timeout      *model.Duration `yaml:"timeout"`
-	Retry        retry.Spec      `yaml:"retry"`
-	DedupeWindow *model.Duration `yaml:"dedupe_window"`
+	Timeout        *model.Duration `yaml:"timeout"`
+	Retry          retry.Spec      `yaml:"retry"`
+	DedupeWindow   *model.Duration `yaml:"dedupe_window"`
+	RateLimit      *string         `yaml:"rate_limit"`
+	Burst          *int            `yaml:"burst"`
+	MaxConcurrency *int            `yaml:"max_concurrency"`
 }
 
 type upstreamSchema struct {
-	BaseURL      string            `yaml:"base_url"`
-	Timeout      *model.Duration   `yaml:"timeout"`
-	Retry        retry.Spec        `yaml:"retry"`
-	Headers      map[string]string `yaml:"headers"`
-	DedupeWindow *model.Duration   `yaml:"dedupe_window"`
+	BaseURL        string            `yaml:"base_url"`
+	Timeout        *model.Duration   `yaml:"timeout"`
+	Retry          retry.Spec        `yaml:"retry"`
+	Headers        map[string]string `yaml:"headers"`
+	DedupeWindow   *model.Duration   `yaml:"dedupe_window"`
+	RateLimit      *string           `yaml:"rate_limit"`
+	Burst          *int              `yaml:"burst"`
+	MaxConcurrency *int              `yaml:"max_concurrency"`
 }
 
 // Defaults are the resolved global defaults that apply to every upstream.
@@ -55,6 +62,17 @@ type Defaults struct {
 	Timeout      time.Duration
 	Retry        model.RetryPolicy
 	DedupeWindow time.Duration
+	Limits       Limits
+}
+
+// Limits throttle deliveries to one upstream, per Hookyard instance.
+type Limits struct {
+	// RateLimit is the sustained rate; zero means unlimited.
+	RateLimit ratelimit.Rate
+	// Burst is how many requests may be sent at once after a quiet period.
+	Burst int
+	// MaxConcurrency caps in-flight deliveries; zero means unlimited.
+	MaxConcurrency int
 }
 
 // Upstream is a fully resolved upstream configuration.
@@ -67,6 +85,7 @@ type Upstream struct {
 	// secrets and must never be exposed through the API.
 	Headers      map[string]string
 	DedupeWindow time.Duration
+	Limits       Limits
 }
 
 // File is a loaded and validated configuration file.
@@ -277,6 +296,7 @@ func resolve(raw fileSchema) (*File, error) {
 	} else {
 		defaults.Retry = p
 	}
+	defaults.Limits = resolveLimits("defaults", Limits{}, raw.Defaults.RateLimit, raw.Defaults.Burst, raw.Defaults.MaxConcurrency, add)
 
 	upstreams := make([]Upstream, 0, len(raw.Upstreams))
 	for name, u := range raw.Upstreams {
@@ -286,6 +306,7 @@ func resolve(raw fileSchema) (*File, error) {
 		}
 
 		up := Upstream{Name: name, Timeout: defaults.Timeout, Retry: defaults.Retry, DedupeWindow: defaults.DedupeWindow}
+		up.Limits = resolveLimits(prefix, defaults.Limits, u.RateLimit, u.Burst, u.MaxConcurrency, add)
 
 		if base, err := parseBaseURL(u.BaseURL); err != nil {
 			add(prefix+".base_url", "%s", err)
@@ -322,6 +343,46 @@ func resolve(raw fileSchema) (*File, error) {
 		return nil, &Error{Problems: problems}
 	}
 	return &File{Defaults: defaults, Upstreams: NewRegistry(upstreams)}, nil
+}
+
+// Upper bounds for limits, to catch typos.
+const (
+	maxBurst          = 100_000
+	maxMaxConcurrency = 1024
+)
+
+func resolveLimits(prefix string, base Limits, rate *string, burst, concurrency *int, add func(string, string, ...any)) Limits {
+	l := base
+	burstSet := burst != nil
+	if rate != nil {
+		r, err := ratelimit.ParseRate(*rate)
+		if err != nil {
+			add(prefix+".rate_limit", "%s", err)
+		} else {
+			l.RateLimit = r
+			if !burstSet {
+				l.Burst = ratelimit.DefaultBurst(r)
+			}
+		}
+	}
+	if burstSet {
+		if *burst < 1 || *burst > maxBurst {
+			add(prefix+".burst", "must be between 1 and %d", maxBurst)
+		} else {
+			l.Burst = *burst
+		}
+		if l.RateLimit == 0 && rate == nil {
+			add(prefix+".burst", "only applies together with rate_limit")
+		}
+	}
+	if concurrency != nil {
+		if *concurrency < 1 || *concurrency > maxMaxConcurrency {
+			add(prefix+".max_concurrency", "must be between 1 and %d", maxMaxConcurrency)
+		} else {
+			l.MaxConcurrency = *concurrency
+		}
+	}
+	return l
 }
 
 func parseBaseURL(s string) (*url.URL, error) {

@@ -285,6 +285,7 @@ export function createFakeHookyard(options: FakeHookyardOptions = {}): FakeHooky
     timeout: DEFAULT_TIMEOUT,
     retry: { ...PRESETS.standard },
     headerNames: [],
+    limits: { rateLimit: null, burst: null, maxConcurrency: null },
   });
 
   const fake: FakeHookyard = {

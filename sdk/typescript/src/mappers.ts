@@ -120,6 +120,11 @@ export function fromWireUpstream(u: Schemas["Upstream"]): Upstream {
     timeout: u.timeout,
     retry: effectiveRetry(u.retry),
     headerNames: u.header_names,
+    limits: {
+      rateLimit: u.limits.rate_limit ?? null,
+      burst: u.limits.burst ?? null,
+      maxConcurrency: u.limits.max_concurrency ?? null,
+    },
   };
 }
 

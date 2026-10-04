@@ -110,6 +110,8 @@ numbers. Hookyard refuses to start with an invalid file.
 | `timeout` | `30s` | Per-attempt timeout, at most `10m` |
 | `retry` | `standard` | Retry policy (see below) |
 | `dedupe_window` | `24h` | How long a `dedupe_key` is remembered, at most `720h` |
+| `rate_limit` | none | Default rate limit for every upstream (see below) |
+| `max_concurrency` | none | Default concurrency cap for every upstream |
 
 ### `upstreams.<name>`
 
@@ -121,7 +123,30 @@ Names use lowercase letters, digits, `-` and `_`. Applications refer to upstream
 | `timeout` | no | Overrides `defaults.timeout` |
 | `retry` | no | Overrides `defaults.retry` |
 | `dedupe_window` | no | Overrides `defaults.dedupe_window` |
+| `rate_limit` | no | Sustained rate such as `10/s`, `600/m` or `3600/h` |
+| `burst` | no | Requests sent at once after a quiet period (default: one second's worth, at least 1) |
+| `max_concurrency` | no | Maximum deliveries in flight to this upstream (1–1024) |
 | `headers` | no | Headers added to every request, typically credentials. Values are never returned by the API. `Host`, `Content-Length` and hop-by-hop headers can't be set. |
+
+### Rate limits and concurrency
+
+Respect a vendor's published limits, and keep one slow vendor from occupying every worker:
+
+```yaml
+upstreams:
+  courier-x:
+    base_url: https://api.courier-x.example
+    rate_limit: 600/m        # a token bucket: sustained 10 per second...
+    burst: 20                # ...with up to 20 at once after a quiet period
+    max_concurrency: 4       # never more than 4 deliveries in flight
+```
+
+Requests over the limits **wait in the queue** (they stay `pending` and don't use up attempts); other
+upstreams are unaffected. When an upstream answers `429` with a `Retry-After` header, Hookyard pauses
+**all** deliveries to it until then, not just the request that got the `429`.
+
+Limits apply per Hookyard instance. If you run several instances, divide the vendor's limit between
+them.
 
 ### Retry policies
 

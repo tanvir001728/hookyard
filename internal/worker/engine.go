@@ -65,6 +65,7 @@ type Engine struct {
 	upstreams *config.Registry
 	client    *http.Client
 	decide    Decider
+	limits    *limiter
 	wake      chan struct{}
 	now       func() time.Time
 }
@@ -78,6 +79,7 @@ func New(log *slog.Logger, st *store.Store, upstreams *config.Registry, cfg Conf
 		upstreams: upstreams,
 		client:    newHTTPClient(),
 		decide:    PolicyDecider(nil),
+		limits:    newLimiter(upstreams, time.Now()),
 		wake:      make(chan struct{}, 1),
 		now:       time.Now,
 	}
@@ -118,17 +120,20 @@ func (e *Engine) Run(ctx context.Context) error {
 		free := cap(slots) - len(slots)
 		claimed := 0
 		if free > 0 {
-			claims, err := e.store.ClaimDue(ctx, free, e.cfg.LeaseMargin)
+			exclude, caps := e.limits.allowance(e.now())
+			claims, err := e.store.ClaimDue(ctx, store.ClaimOptions{Limit: free, LeaseMargin: e.cfg.LeaseMargin, Exclude: exclude, Caps: caps})
 			if err != nil && !errors.Is(err, context.Canceled) {
 				e.log.Error("claiming requests failed", "error", err)
 			}
 			claimed = len(claims)
 			for _, c := range claims {
+				e.limits.acquire(c.Request.Upstream, e.now())
 				slots <- struct{}{}
 				wg.Add(1)
 				go func() {
 					defer wg.Done()
 					defer func() {
+						e.limits.release(c.Request.Upstream)
 						<-slots
 						select {
 						case freed <- struct{}{}:
@@ -140,8 +145,9 @@ func (e *Engine) Run(ctx context.Context) error {
 			}
 		}
 
-		// A full batch suggests more work is due: look again right away.
-		if free > 0 && claimed == free {
+		// Claiming changes slots and per-upstream allowances, and limits may
+		// have held work back: look again right away until nothing is claimed.
+		if claimed > 0 {
 			continue
 		}
 		timer := time.NewTimer(e.idleWait(ctx))
@@ -172,13 +178,18 @@ func (e *Engine) Run(ctx context.Context) error {
 }
 
 // idleWait returns how long to sleep before checking the queue again: until
-// the next retry is due, but never longer than the poll interval.
+// the next retry is due or a throttled upstream can send again, but never
+// longer than the poll interval.
 func (e *Engine) idleWait(ctx context.Context) time.Duration {
-	next, err := e.store.NextDueAt(ctx)
-	if err != nil || next == nil {
-		return e.cfg.PollInterval
+	now := e.now()
+	wait := e.cfg.PollInterval
+	if next, err := e.store.NextDueAt(ctx); err == nil && next != nil {
+		wait = min(wait, next.Sub(now))
 	}
-	return min(max(next.Sub(e.now()), time.Millisecond), e.cfg.PollInterval)
+	if t := e.limits.nextChange(now); !t.IsZero() {
+		wait = min(wait, t.Sub(now))
+	}
+	return max(wait, time.Millisecond)
 }
 
 func (e *Engine) recoverLoop(ctx context.Context) {

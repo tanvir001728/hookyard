@@ -211,3 +211,56 @@ func TestRegistrySuggest(t *testing.T) {
 		t.Errorf("message = %q", msg)
 	}
 }
+
+func TestParseFileLimits(t *testing.T) {
+	src := `
+defaults:
+  max_concurrency: 8
+upstreams:
+  a:
+    base_url: http://a
+    rate_limit: 600/m
+  b:
+    base_url: http://b
+    rate_limit: 5/s
+    burst: 20
+    max_concurrency: 2
+  c:
+    base_url: http://c
+`
+	f, err := ParseFile([]byte(src), env(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, _ := f.Upstreams.Get("a")
+	b, _ := f.Upstreams.Get("b")
+	c, _ := f.Upstreams.Get("c")
+	if a.Limits != (Limits{RateLimit: 10, Burst: 10, MaxConcurrency: 8}) {
+		t.Errorf("a = %+v (default burst is one second's worth; concurrency from defaults)", a.Limits)
+	}
+	if b.Limits != (Limits{RateLimit: 5, Burst: 20, MaxConcurrency: 2}) {
+		t.Errorf("b = %+v", b.Limits)
+	}
+	if c.Limits != (Limits{MaxConcurrency: 8}) {
+		t.Errorf("c = %+v (no rate limit unless configured)", c.Limits)
+	}
+}
+
+func TestParseFileLimitErrors(t *testing.T) {
+	src := `
+upstreams:
+  a:
+    base_url: http://a
+    rate_limit: 10 per second
+    max_concurrency: 0
+  b:
+    base_url: http://b
+    burst: 5
+`
+	_, err := ParseFile([]byte(src), env(nil))
+	for _, want := range []string{"upstreams.a.rate_limit: invalid rate", "upstreams.a.max_concurrency: must be between 1", "upstreams.b.burst: only applies together with rate_limit"} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("error should mention %q: %v", want, err)
+		}
+	}
+}

@@ -53,6 +53,7 @@ export type {
   Tags,
   Timestamp,
   Upstream,
+  UpstreamLimits,
   UpstreamClient,
   UpstreamStats,
   UpstreamsApi,

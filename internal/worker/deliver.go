@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/tanvir001728/hookyard/internal/model"
+	"github.com/tanvir001728/hookyard/internal/retry"
 	"github.com/tanvir001728/hookyard/internal/store"
 	"github.com/tanvir001728/hookyard/internal/version"
 )
@@ -57,6 +58,15 @@ func (e *Engine) deliver(ctx context.Context, c store.Claim) {
 	finished := e.now()
 
 	d := e.decide(req, number, result, finished)
+
+	// A 429 with Retry-After throttles the whole upstream, not just this
+	// request, so other requests don't run into the same limit.
+	if result.StatusCode == http.StatusTooManyRequests && result.Headers != nil {
+		if wait, ok := retry.ParseRetryAfter(result.Headers.Get("Retry-After"), finished); ok && wait > 0 {
+			e.limits.block(req.Upstream, finished.Add(wait))
+			log.Info("upstream rate limited; pausing its deliveries", "until", finished.Add(wait))
+		}
+	}
 	attempt := model.Attempt{
 		RequestID: req.ID,
 		Number:    number,

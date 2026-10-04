@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -34,20 +35,27 @@ type harness struct {
 
 func newHarness(t *testing.T) *harness {
 	t.Helper()
+	return newHarnessWith(t, config.Upstream{
+		Name:    "flaky",
+		Timeout: 2 * time.Second,
+		Retry:   fastRetry,
+		Headers: map[string]string{"Authorization": "Bearer vendor-secret"},
+	})
+}
+
+// newHarnessWith points every given upstream at one flakyvendor.
+func newHarnessWith(t *testing.T, upstreams ...config.Upstream) *harness {
+	t.Helper()
 	st, dbURL := storetest.NewWithURL(t)
 	vendor := flakyvendor.New()
 	srv := httptest.NewServer(vendor)
 	t.Cleanup(srv.Close)
 
 	base, _ := url.Parse(srv.URL)
-	reg := config.NewRegistry([]config.Upstream{{
-		Name:    "flaky",
-		BaseURL: base,
-		Timeout: 2 * time.Second,
-		Retry:   fastRetry,
-		Headers: map[string]string{"Authorization": "Bearer vendor-secret"},
-	}})
-	return &harness{t: t, store: st, dbURL: dbURL, vendor: vendor, reg: reg}
+	for i := range upstreams {
+		upstreams[i].BaseURL = base
+	}
+	return &harness{t: t, store: st, dbURL: dbURL, vendor: vendor, reg: config.NewRegistry(upstreams)}
 }
 
 // start runs an engine until the test ends.
@@ -333,7 +341,7 @@ func TestCrashRecovery(t *testing.T) {
 
 	// A worker claims the request and dies before recording anything.
 	req := h.enqueue("/orders")
-	if claims, err := h.store.ClaimDue(context.Background(), 1, time.Minute); err != nil || len(claims) != 1 {
+	if claims, err := h.store.ClaimDue(context.Background(), store.ClaimOptions{Limit: 1, LeaseMargin: time.Minute}); err != nil || len(claims) != 1 {
 		t.Fatalf("claim: %v %v", claims, err)
 	}
 	expireLeases(t, h.dbURL)
@@ -422,5 +430,106 @@ func expireLeases(t *testing.T, dbURL string) {
 	defer conn.Close(t.Context())
 	if _, err := conn.Exec(t.Context(), `UPDATE requests SET lease_expires_at = now() - interval '1 second' WHERE status = 'in_flight'`); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// receivedAt returns when the vendor received each request whose path
+// starts with prefix, in order.
+func (h *harness) receivedAt(prefix string) []time.Time {
+	var out []time.Time
+	for _, r := range h.vendor.Requests() {
+		if strings.HasPrefix(r.Path, prefix) {
+			out = append(out, r.At)
+		}
+	}
+	return out
+}
+
+func TestRateLimit(t *testing.T) {
+	t.Parallel()
+	h := newHarnessWith(t, config.Upstream{Name: "rated", Timeout: 2 * time.Second, Retry: fastRetry, Limits: config.Limits{RateLimit: 5, Burst: 1}})
+	h.start(Config{})
+
+	var ids []string
+	for range 11 {
+		ids = append(ids, h.enqueue("/rated", func(in *store.NewRequest) { in.Upstream = "rated" }).ID)
+	}
+	for _, id := range ids {
+		h.waitStatus(id, model.StatusSucceeded)
+	}
+	at := h.receivedAt("/rated")
+	// 11 requests at 5/s with no burst: 10 intervals of 200ms.
+	if took := at[len(at)-1].Sub(at[0]); took < 1800*time.Millisecond || took > 3*time.Second {
+		t.Errorf("11 requests at 5/s took %s, want about 2s", took)
+	}
+}
+
+func TestConcurrencyCap(t *testing.T) {
+	t.Parallel()
+	h := newHarnessWith(t, config.Upstream{Name: "capped", Timeout: 5 * time.Second, Retry: fastRetry, Limits: config.Limits{MaxConcurrency: 2}})
+	h.start(Config{Workers: 8})
+
+	var ids []string
+	for range 6 {
+		ids = append(ids, h.enqueue("/capped?latency=300ms", func(in *store.NewRequest) { in.Upstream = "capped" }).ID)
+	}
+	for _, id := range ids {
+		h.waitStatus(id, model.StatusSucceeded)
+	}
+	// Each delivery lasts 300ms: count how many started within 300ms of each other.
+	at := h.receivedAt("/capped")
+	for i := range at {
+		overlapping := 0
+		for j := range at {
+			if d := at[j].Sub(at[i]); d >= 0 && d < 250*time.Millisecond {
+				overlapping++
+			}
+		}
+		if overlapping > 2 {
+			t.Fatalf("%d deliveries ran at once, want at most 2 (starts: %v)", overlapping, at)
+		}
+	}
+	if took := at[len(at)-1].Sub(at[0]); took < 500*time.Millisecond {
+		t.Errorf("6 deliveries of 300ms, 2 at a time, started within %s; want at least ~600ms", took)
+	}
+}
+
+func TestSlowUpstreamDoesNotDelayOthers(t *testing.T) {
+	t.Parallel()
+	h := newHarnessWith(t,
+		config.Upstream{Name: "slow", Timeout: 5 * time.Second, Retry: fastRetry, Limits: config.Limits{MaxConcurrency: 1}},
+		config.Upstream{Name: "fast", Timeout: 5 * time.Second, Retry: fastRetry},
+	)
+	h.start(Config{Workers: 4})
+
+	for range 5 {
+		h.enqueue("/slow?latency=1s", func(in *store.NewRequest) { in.Upstream = "slow" })
+	}
+	start := time.Now()
+	var fast []string
+	for range 5 {
+		fast = append(fast, h.enqueue("/fast", func(in *store.NewRequest) { in.Upstream = "fast" }).ID)
+	}
+	for _, id := range fast {
+		h.waitStatus(id, model.StatusSucceeded)
+	}
+	if took := time.Since(start); took > 1500*time.Millisecond {
+		t.Errorf("fast upstream took %s while a slow one had a backlog; it must not wait behind it", took)
+	}
+}
+
+func TestTooManyRequestsPausesUpstream(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.start(Config{})
+
+	limited := h.enqueue("/first?status=429&retry_after=1", func(in *store.NewRequest) { in.Retry.MaxAttempts = 1 })
+	h.waitStatus(limited.ID, model.StatusDead)
+
+	other := h.enqueue("/second")
+	h.waitStatus(other.ID, model.StatusSucceeded)
+	first, second := h.receivedAt("/first"), h.receivedAt("/second")
+	if gap := second[0].Sub(first[0]); gap < 900*time.Millisecond {
+		t.Errorf("a request to the same upstream went out %s after a 429 with Retry-After: 1", gap)
 	}
 }

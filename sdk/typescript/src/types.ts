@@ -272,6 +272,17 @@ export interface Upstream {
   retry: EffectiveRetryPolicy;
   /** Names of headers added to every request. */
   headerNames: string[];
+  /** Throttling applied by each Hookyard instance; requests over the limits wait in the queue. */
+  limits: UpstreamLimits;
+}
+
+export interface UpstreamLimits {
+  /** Sustained rate such as `"10/s"`, or `null` for unlimited. */
+  rateLimit: string | null;
+  /** Requests that may be sent at once after a quiet period, or `null` without a rate limit. */
+  burst: number | null;
+  /** Maximum deliveries in flight at once, or `null` for unlimited. */
+  maxConcurrency: number | null;
 }
 
 /** Attempt latency percentiles in milliseconds, `null` when there were no attempts. */

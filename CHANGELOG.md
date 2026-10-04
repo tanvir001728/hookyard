@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Per-upstream rate limits (`rate_limit`, `burst`) and concurrency caps (`max_concurrency`). Requests
+  over the limits wait in the queue without using up attempts, other upstreams are unaffected, and a
+  `429` with `Retry-After` pauses all deliveries to that upstream until then. Limits appear in
+  `GET /v1/upstreams` and the SDK.
+
 ## [0.1.0] - 2026-10-04
 
 The first release: Hookyard delivers outbound API calls reliably, and you can watch and manage

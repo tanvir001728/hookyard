@@ -20,7 +20,7 @@ func finish(t *testing.T, s *store.Store, in store.NewRequest, status model.Stat
 	if err != nil {
 		t.Fatal(err)
 	}
-	claims, err := s.ClaimDue(ctx, 100, time.Minute)
+	claims, err := s.ClaimDue(ctx, store.ClaimOptions{Limit: 100, LeaseMargin: time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +98,7 @@ func TestCancelRequest(t *testing.T) {
 		canceled.LastError == nil || canceled.LastError.Code != "canceled" || canceled.LastError.Message != "canceled by ops" {
 		t.Errorf("canceled request: %+v", canceled)
 	}
-	if claims, _ := s.ClaimDue(ctx, 10, time.Minute); len(claims) != 0 {
+	if claims, _ := s.ClaimDue(ctx, store.ClaimOptions{Limit: 10, LeaseMargin: time.Minute}); len(claims) != 0 {
 		t.Error("canceled requests must not be delivered")
 	}
 
@@ -109,7 +109,7 @@ func TestCancelRequest(t *testing.T) {
 		t.Errorf("cancel succeeded request: %v", err)
 	}
 	inFlight, _, _ := s.CreateRequest(ctx, newRequest())
-	if _, err := s.ClaimDue(ctx, 10, time.Minute); err != nil {
+	if _, err := s.ClaimDue(ctx, store.ClaimOptions{Limit: 10, LeaseMargin: time.Minute}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.CancelRequest(ctx, inFlight.ID, "ops"); !errors.As(err, &stateErr) || stateErr.Status != model.StatusInFlight {

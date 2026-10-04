@@ -243,6 +243,25 @@ type upstreamJSON struct {
 	Timeout     model.Duration  `json:"timeout"`
 	Retry       retryPolicyJSON `json:"retry"`
 	HeaderNames []string        `json:"header_names"`
+	Limits      limitsJSON      `json:"limits"`
+}
+
+type limitsJSON struct {
+	RateLimit      *string `json:"rate_limit"`
+	Burst          *int    `json:"burst"`
+	MaxConcurrency *int    `json:"max_concurrency"`
+}
+
+func toLimitsJSON(l config.Limits) limitsJSON {
+	var out limitsJSON
+	if l.RateLimit > 0 {
+		rate := l.RateLimit.String()
+		out.RateLimit, out.Burst = &rate, &l.Burst
+	}
+	if l.MaxConcurrency > 0 {
+		out.MaxConcurrency = &l.MaxConcurrency
+	}
+	return out
 }
 
 func toUpstreamJSON(u config.Upstream) upstreamJSON {
@@ -257,6 +276,7 @@ func toUpstreamJSON(u config.Upstream) upstreamJSON {
 		Timeout:     model.Duration(u.Timeout),
 		Retry:       toRetryJSON(u.Retry),
 		HeaderNames: names,
+		Limits:      toLimitsJSON(u.Limits),
 	}
 }
 

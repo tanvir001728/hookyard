@@ -21,6 +21,8 @@ upstreams:
     retry:
       preset: patient     # start from a preset...
       max_attempts: 20    # ...and override individual fields
+    rate_limit: 600/m     # respect the vendor's limit (10 per second)
+    max_concurrency: 4    # at most 4 deliveries in flight
     headers:              # added to every request; values are never returned by the API
       Authorization: "Bearer ${COURIER_X_TOKEN}"
       X-Api-Version: "2024-01"

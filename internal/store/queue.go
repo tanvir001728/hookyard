@@ -23,24 +23,71 @@ type Claim struct {
 	LeaseExpiresAt time.Time
 }
 
-// ClaimDue marks up to limit due requests as in_flight and returns them. Each
-// lease lasts the request's timeout plus leaseMargin. Concurrent callers never
-// receive the same request.
-func (s *Store) ClaimDue(ctx context.Context, limit int, leaseMargin time.Duration) ([]Claim, error) {
+// ClaimOptions controls which due requests ClaimDue may take.
+type ClaimOptions struct {
+	// Limit is the maximum number of requests to claim in total.
+	Limit int
+	// LeaseMargin is added to each request's timeout to form its lease.
+	LeaseMargin time.Duration
+	// Exclude lists upstreams that can't take any request right now.
+	Exclude []string
+	// Caps limits how many requests may be claimed per upstream; upstreams
+	// without an entry are limited only by Limit.
+	Caps map[string]int
+	// Scan bounds how many due candidates are examined; zero means 4×Limit,
+	// at least 100.
+	Scan int
+}
+
+// ClaimDue marks due requests as in_flight and returns them, oldest due
+// first, respecting the per-upstream caps and the overall limit. Concurrent
+// callers never receive the same request.
+func (s *Store) ClaimDue(ctx context.Context, o ClaimOptions) ([]Claim, error) {
+	if o.Limit <= 0 {
+		return nil, nil
+	}
+	scan := o.Scan
+	if scan <= 0 {
+		scan = max(100, 4*o.Limit)
+	}
+	caps, err := json.Marshal(o.Caps)
+	if err != nil {
+		return nil, err
+	}
+	exclude := o.Exclude
+	if exclude == nil {
+		exclude = []string{}
+	}
+
+	// Candidates are locked with SKIP LOCKED, then ranked per upstream and
+	// overall; only those within their upstream's cap and the overall limit
+	// are claimed. Unclaimed candidates are released when the statement ends.
 	rows, err := s.pool.Query(ctx, `
-		UPDATE requests SET
-			status = 'in_flight',
-			lease_expires_at = now() + (timeout_ms + $2) * interval '1 millisecond',
-			updated_at = now()
-		WHERE id IN (
-			SELECT id FROM requests
-			WHERE status IN ('scheduled', 'pending', 'failed') AND next_attempt_at <= now()
+		WITH candidates AS (
+			SELECT id, upstream, next_attempt_at FROM requests
+			WHERE status IN ('scheduled', 'pending', 'failed')
+				AND next_attempt_at <= now()
+				AND NOT (upstream = ANY($3))
 			ORDER BY next_attempt_at
-			LIMIT $1
+			LIMIT $4
 			FOR UPDATE SKIP LOCKED
+		), per_upstream AS (
+			SELECT id, upstream, next_attempt_at,
+				row_number() OVER (PARTITION BY upstream ORDER BY next_attempt_at) AS rn
+			FROM candidates
+		), allowed AS (
+			SELECT id, row_number() OVER (ORDER BY next_attempt_at) AS overall
+			FROM per_upstream
+			WHERE rn <= COALESCE(($5::jsonb ->> upstream)::int, $1)
 		)
-		RETURNING `+requestColumns+`, lease_expires_at`,
-		limit, leaseMargin.Milliseconds())
+		UPDATE requests r SET
+			status = 'in_flight',
+			lease_expires_at = now() + (r.timeout_ms + $2) * interval '1 millisecond',
+			updated_at = now()
+		FROM allowed
+		WHERE r.id = allowed.id AND allowed.overall <= $1
+		RETURNING `+prefixColumns("r.")+`, r.lease_expires_at`,
+		o.Limit, o.LeaseMargin.Milliseconds(), exclude, scan, string(caps))
 	if err != nil {
 		return nil, fmt.Errorf("claim due requests: %w", err)
 	}

@@ -561,6 +561,28 @@ export interface components {
              *     ]
              */
             header_names: string[];
+            limits: components["schemas"]["UpstreamLimits"];
+        };
+        /**
+         * @description Throttling for deliveries to this upstream, applied by each Hookyard instance. Requests over
+         *     the limits wait in the queue.
+         */
+        UpstreamLimits: {
+            /**
+             * @description Sustained rate, such as `10/s` or `600/m`, or `null` for unlimited.
+             * @example 10/s
+             */
+            rate_limit: string | null;
+            /**
+             * @description Requests that may be sent at once after a quiet period, or `null` without a rate limit.
+             * @example 10
+             */
+            burst: number | null;
+            /**
+             * @description Maximum deliveries in flight at once, or `null` for unlimited.
+             * @example 4
+             */
+            max_concurrency: number | null;
         };
         UpstreamList: {
             data: components["schemas"]["Upstream"][];
