@@ -1,8 +1,9 @@
 import { useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getRouteApi, Link } from "@tanstack/react-router";
-import { ArrowLeft, Ban, ChevronDown, Clock, RotateCcw } from "lucide-react";
+import { ArrowLeft, Ban, CheckCircle2, ChevronDown, Clock, HelpCircle, RotateCcw, XCircle } from "lucide-react";
 import { PageHeader } from "@/components/layout/app-shell";
+import { ResolveDialog, type Resolution } from "@/components/resolve-dialog";
 import { finalStatuses, StatusBadge } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -61,6 +62,7 @@ const outcomeStyle = {
   success: { tone: "success", label: "Success" },
   retryable_failure: { tone: "warning", label: "Retryable failure" },
   permanent_failure: { tone: "danger", label: "Permanent failure" },
+  unknown: { tone: "warning", label: "No response" },
 } as const;
 
 function AttemptItem({ attempt, last }: { attempt: Attempt; last: boolean }) {
@@ -129,6 +131,7 @@ export function RequestDetailPage() {
   const { id } = route.useParams();
   const qc = useQueryClient();
   const [copyAs, setCopyAs] = useState<"curl" | "sdk">("curl");
+  const [resolution, setResolution] = useState<Resolution | null>(null);
 
   const request = useQuery({
     queryKey: ["request", id],
@@ -198,7 +201,17 @@ export function RequestDetailPage() {
         }
         actions={
           <>
-            {replayable && (
+            {r.status === "unknown" && (
+              <>
+                <Button onClick={() => setResolution("succeeded")}>
+                  <CheckCircle2 /> Mark as delivered
+                </Button>
+                <Button variant="outline" onClick={() => setResolution("dead")}>
+                  <XCircle /> Mark as failed
+                </Button>
+              </>
+            )}
+            {replayable && r.status !== "unknown" && (
               <Button onClick={() => action.mutate("replay")} disabled={action.isPending}>
                 {action.isPending && action.variables === "replay" ? <Spinner /> : <RotateCcw />} Replay
               </Button>
@@ -212,6 +225,19 @@ export function RequestDetailPage() {
         }
       />
       {action.isError && <ErrorState error={action.error} className="mb-4" />}
+      {r.status === "unknown" && (
+        <div role="note" className="mb-4 flex gap-3 rounded-lg border border-amber-500/30 bg-amber-500/5 p-4 text-sm">
+          <HelpCircle className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400" aria-hidden />
+          <div>
+            <p className="font-medium">Did this go through? Hookyard can't tell.</p>
+            <p className="mt-1 text-muted-foreground">
+              The request was sent to {r.upstream}, but no response arrived, so it may or may not have been processed. To avoid a
+              duplicate it wasn't retried. Check with {r.upstream}, then mark it as delivered or as failed.
+            </p>
+          </div>
+        </div>
+      )}
+      <ResolveDialog request={r} resolution={resolution} onClose={() => setResolution(null)} />
       {action.isSuccess && (
         <p role="status" className="mb-4 rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3 text-sm">
           {action.variables === "replay" ? "Queued for delivery again with a fresh retry budget." : "Request canceled."}

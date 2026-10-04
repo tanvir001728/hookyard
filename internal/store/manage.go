@@ -35,6 +35,8 @@ func (e *InvalidStateError) Error() string {
 		allowed = ReplayableStatuses
 	case "cancel":
 		allowed = CancelableStatuses
+	case "resolve":
+		allowed = []model.Status{model.StatusUnknown}
 	}
 	names := make([]string, len(allowed))
 	for i, s := range allowed {
@@ -70,6 +72,11 @@ func (s *Store) CancelRequest(ctx context.Context, id, actor string) (model.Requ
 // the action in the audit log, in one transaction. In set, $1 is the id and
 // $2, $3, ... are args.
 func (s *Store) transition(ctx context.Context, id, actor, action string, from []model.Status, set string, args ...any) (model.Request, error) {
+	return s.transitionWithDetails(ctx, id, actor, action, from, set, nil, args...)
+}
+
+// transitionWithDetails is transition with extra audit details.
+func (s *Store) transitionWithDetails(ctx context.Context, id, actor, action string, from []model.Status, set string, details map[string]any, args ...any) (model.Request, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return model.Request{}, err
@@ -92,10 +99,33 @@ func (s *Store) transition(ctx context.Context, id, actor, action string, from [
 	if err != nil {
 		return model.Request{}, fmt.Errorf("%s request: %w", action, err)
 	}
-	if err := insertAudit(ctx, tx, actor, action, "request", id, map[string]any{"from_status": current}); err != nil {
+	audit := map[string]any{"from_status": current}
+	for k, v := range details {
+		audit[k] = v
+	}
+	if err := insertAudit(ctx, tx, actor, action, "request", id, audit); err != nil {
 		return model.Request{}, err
 	}
 	return req, tx.Commit(ctx)
+}
+
+// ResolveRequest settles a request whose outcome is unknown, after a person
+// or the application checked with the upstream: succeeded, or dead (to the
+// DLQ).
+func (s *Store) ResolveRequest(ctx context.Context, id, actor string, outcome model.Status, reason string) (model.Request, error) {
+	if outcome != model.StatusSucceeded && outcome != model.StatusDead {
+		return model.Request{}, fmt.Errorf("resolve: outcome must be succeeded or dead, got %q", outcome)
+	}
+	set := `
+		status = $2,
+		next_attempt_at = NULL,
+		completed_at = now(),
+		updated_at = now()`
+	if outcome == model.StatusSucceeded {
+		set += `, last_error_code = NULL, last_error_message = NULL`
+	}
+	return s.transitionWithDetails(ctx, id, actor, "resolve", []model.Status{model.StatusUnknown}, set,
+		map[string]any{"outcome": string(outcome), "reason": reason}, string(outcome))
 }
 
 // DLQFilter selects dead requests. Zero values match everything.

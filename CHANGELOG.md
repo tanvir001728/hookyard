@@ -7,7 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **A POST or PATCH that was sent but got no response is no longer retried by default.** It becomes
+  `unknown`, because the vendor may have processed it and a retry could duplicate it (for example a
+  payment). Settle it with `POST /v1/requests/{id}/resolve` (or in the dashboard), or replay it.
+  Requests with an `Idempotency-Key` header, idempotent methods (GET, PUT, DELETE), failures before
+  the request was sent, and upstreams with `on_timeout: retry` are still retried.
+
 ### Added
+
+- `POST /v1/requests/{id}/resolve` to settle `unknown` requests, the `on_timeout` upstream setting,
+  and "Mark as delivered / Mark as failed" on the dashboard's request page.
 
 - Response classification rules per upstream (`classify`): match on status code and a value in the
   JSON body to decide whether a response is a success, a retryable failure or a permanent failure,

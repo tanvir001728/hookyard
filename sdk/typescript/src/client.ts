@@ -190,6 +190,13 @@ export class Hookyard implements HookyardClient {
         });
         return fromWireRequest(res.data);
       },
+      async resolve(id: string, outcome: "succeeded" | "dead", options: { reason?: string | undefined } = {}): Promise<HookyardRequest> {
+        const body: Record<string, string> = { outcome };
+        if (options.reason !== undefined) body.reason = options.reason;
+        // Not retried: a retry after a resolve that went through would report a conflict.
+        const res = await transport.call<Schemas["Request"]>({ method: "POST", path: `/v1/requests/${enc(id)}/resolve`, body, retry: false });
+        return fromWireRequest(res.data);
+      },
     };
 
     this.dlq = {

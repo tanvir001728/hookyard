@@ -383,3 +383,18 @@ upstreams:
 		t.Errorf("typo inside a list item must be caught: %v", err)
 	}
 }
+
+func TestParseFileOnTimeout(t *testing.T) {
+	f, err := ParseFile([]byte("upstreams:\n  a:\n    base_url: http://a\n  b:\n    base_url: http://b\n    on_timeout: retry\n"), env(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, _ := f.Upstreams.Get("a")
+	b, _ := f.Upstreams.Get("b")
+	if a.OnTimeout != OnTimeoutUnknown || b.OnTimeout != OnTimeoutRetry {
+		t.Errorf("a=%s b=%s, want unknown (default) and retry", a.OnTimeout, b.OnTimeout)
+	}
+	if _, err := ParseFile([]byte("upstreams:\n  a:\n    base_url: http://a\n    on_timeout: maybe\n"), env(nil)); err == nil || !strings.Contains(err.Error(), "upstreams.a.on_timeout") {
+		t.Errorf("invalid value: %v", err)
+	}
+}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -300,7 +301,10 @@ func TestTimeout(t *testing.T) {
 	h := newHarness(t)
 	h.start(Config{})
 
+	// A GET, which is safe to retry; an ambiguous POST would become unknown
+	// instead (see TestAmbiguousFailures).
 	req := h.enqueue("/slow?hang=1", func(in *store.NewRequest) {
+		in.Method, in.Body = http.MethodGet, nil
 		in.Timeout = 100 * time.Millisecond
 		in.Retry.MaxAttempts = 1
 	})
@@ -715,4 +719,51 @@ func TestClassificationRules(t *testing.T) {
 	if by := h.attempts(plain.ID)[0].ClassifiedBy; by != "" {
 		t.Errorf("default classification recorded rule %q", by)
 	}
+}
+
+func TestAmbiguousFailures(t *testing.T) {
+	t.Parallel()
+	h := newHarnessWith(t,
+		config.Upstream{Name: "flaky", Timeout: 2 * time.Second, Retry: fastRetry},
+		config.Upstream{Name: "lenient", Timeout: 2 * time.Second, Retry: fastRetry, OnTimeout: config.OnTimeoutRetry},
+	)
+	// An upstream nobody listens on: connections are refused before anything is sent.
+	closed, _ := url.Parse("http://" + freeAddr(t))
+	h.reg = config.NewRegistry(append(h.reg.All(), config.Upstream{Name: "closed", BaseURL: closed, Timeout: 2 * time.Second, Retry: fastRetry}))
+	h.start(Config{})
+
+	hang := func(in *store.NewRequest) {
+		in.Timeout = 200 * time.Millisecond
+		in.Retry.MaxAttempts = 2
+	}
+	unknownPost := h.enqueue("/hang?hang=1&key=a", hang)
+	keyedPost := h.enqueue("/hang?hang=1&key=b", hang, func(in *store.NewRequest) { in.Headers = map[string]string{"Idempotency-Key": "order-1"} })
+	get := h.enqueue("/hang?hang=1&key=c", hang, func(in *store.NewRequest) { in.Method = http.MethodGet; in.Body = nil })
+	lenient := h.enqueue("/hang?hang=1&key=d", hang, func(in *store.NewRequest) { in.Upstream = "lenient" })
+	refused := h.enqueue("/x", hang, func(in *store.NewRequest) { in.Upstream = "closed" })
+
+	// A POST that may have gone through is not repeated.
+	got := h.waitStatus(unknownPost.ID, model.StatusUnknown)
+	attempts := h.attempts(unknownPost.ID)
+	if got.AttemptCount != 1 || got.CompletedAt == nil || attempts[0].Outcome != model.OutcomeUnknown {
+		t.Errorf("POST without a key: %+v (attempt %+v)", got, attempts[0])
+	}
+	// Everything that is safe to repeat is retried until max_attempts.
+	for name, id := range map[string]string{"POST with Idempotency-Key": keyedPost.ID, "GET": get.ID, "on_timeout: retry": lenient.ID, "connection refused": refused.ID} {
+		if r := h.waitStatus(id, model.StatusDead); r.AttemptCount != 2 {
+			t.Errorf("%s: %d attempts, want 2 (retried)", name, r.AttemptCount)
+		}
+	}
+}
+
+func freeAddr(t *testing.T) string {
+	t.Helper()
+	var lc net.ListenConfig
+	l, err := lc.Listen(t.Context(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := l.Addr().String()
+	_ = l.Close()
+	return addr
 }

@@ -9,9 +9,12 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"strconv"
+	"sync/atomic"
 	"time"
 
+	"github.com/tanvir001728/hookyard/internal/config"
 	"github.com/tanvir001728/hookyard/internal/model"
 	"github.com/tanvir001728/hookyard/internal/retry"
 	"github.com/tanvir001728/hookyard/internal/store"
@@ -50,6 +53,13 @@ type AttemptResult struct {
 	Outcome model.AttemptOutcome
 	// Rule names the classification rule that decided Outcome.
 	Rule string
+	// Ambiguous means the request was fully sent but no response arrived,
+	// so the upstream may or may not have processed it.
+	Ambiguous bool
+	// SafeToRepeat means repeating the request can't duplicate a side effect:
+	// its method is idempotent, it carries an Idempotency-Key, or the upstream
+	// is configured to retry ambiguous failures.
+	SafeToRepeat bool
 }
 
 // ErrCodeClassifiedFailure marks a response that a classification rule
@@ -131,6 +141,8 @@ func (e *Engine) deliver(ctx context.Context, c store.Claim) {
 	switch d.Status {
 	case model.StatusSucceeded:
 		log.Debug("delivered", attrs...)
+	case model.StatusUnknown:
+		log.Warn("delivery outcome unknown: the request was sent but no response arrived; not retrying to avoid a duplicate", attrs...)
 	case model.StatusFailed:
 		log.Info("delivery failed, retry scheduled", append(attrs, "retry_at", d.RetryAt)...)
 	default:
@@ -177,9 +189,17 @@ func (e *Engine) send(ctx context.Context, req model.Request, attempt int) (Atte
 	httpReq.Header.Set("Hookyard-Request-Id", req.ID)
 	httpReq.Header.Set("Hookyard-Attempt", strconv.Itoa(attempt))
 
+	// Track whether the whole request reached the network: failures before
+	// that are safe to retry, failures after it are ambiguous.
+	var wrote atomic.Bool
+	httpReq = httpReq.WithContext(httptrace.WithClientTrace(httpReq.Context(), &httptrace.ClientTrace{
+		WroteRequest: func(info httptrace.WroteRequestInfo) { wrote.Store(info.Err == nil) },
+	}))
+	safe := isIdempotent(req.Method) || httpReq.Header.Get("Idempotency-Key") != "" || up.OnTimeout == config.OnTimeoutRetry
+
 	resp, err := e.client.Do(httpReq)
 	if err != nil {
-		return AttemptResult{Error: transportError(err, req.Timeout)}, nil
+		return AttemptResult{Error: transportError(err, req.Timeout), Ambiguous: wrote.Load(), SafeToRepeat: safe}, nil
 	}
 	defer resp.Body.Close()
 
@@ -216,6 +236,16 @@ func (e *Engine) send(ctx context.Context, req model.Request, attempt int) (Atte
 		}
 	}
 	return result, stored
+}
+
+// isIdempotent reports whether repeating a request with this method can't
+// cause additional side effects (RFC 9110, section 9.2.2).
+func isIdempotent(method string) bool {
+	switch method {
+	case http.MethodGet, http.MethodHead, http.MethodPut, http.MethodDelete, http.MethodOptions:
+		return true
+	}
+	return false
 }
 
 // encodeBody turns the stored JSON value into the bytes to send. A JSON string

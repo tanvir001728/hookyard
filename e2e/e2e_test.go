@@ -385,3 +385,19 @@ func TestGracefulShutdown(t *testing.T) {
 		t.Errorf("after graceful shutdown: status %s, vendor received %d (want succeeded, 1)", got.Status, len(vendorAttempts(t, key)))
 	}
 }
+
+// TestAmbiguousPostBecomesUnknown: a POST that was sent but got no response
+// isn't repeated (it might have gone through); it waits to be resolved.
+func TestAmbiguousPostBecomesUnknown(t *testing.T) {
+	key := unique(t)
+	req := enqueue(t, map[string]any{"path": "/charge?hang=1&key=" + key, "timeout": "300ms"})
+	unknown := waitStatus(t, req.ID, "unknown", 10*time.Second)
+	if unknown.AttemptCount != 1 || len(vendorAttempts(t, key)) != 1 {
+		t.Fatalf("attempts: hookyard %d, vendor %d; want exactly 1 (no retry)", unknown.AttemptCount, len(vendorAttempts(t, key)))
+	}
+
+	var resolved request
+	if status, _ := call(t, http.MethodPost, "/v1/requests/"+req.ID+"/resolve", map[string]any{"outcome": "succeeded", "reason": "vendor confirmed"}, &resolved); status != http.StatusOK || resolved.Status != "succeeded" {
+		t.Fatalf("resolve: status %d, request %+v", status, resolved)
+	}
+}

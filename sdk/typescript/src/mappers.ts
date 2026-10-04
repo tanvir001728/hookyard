@@ -138,6 +138,7 @@ export function fromWireUpstream(u: Schemas["Upstream"]): Upstream {
       availableTokens: u.state.available_tokens ?? null,
       throttledUntil: optionalDate(u.state.throttled_until),
     },
+    onTimeout: u.on_timeout,
   };
 }
 

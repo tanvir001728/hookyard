@@ -129,6 +129,9 @@ const (
 	OutcomeSuccess          AttemptOutcome = "success"
 	OutcomeRetryableFailure AttemptOutcome = "retryable_failure"
 	OutcomePermanentFailure AttemptOutcome = "permanent_failure"
+	// OutcomeUnknown means the request was sent but no response arrived, so
+	// it may or may not have been processed.
+	OutcomeUnknown AttemptOutcome = "unknown"
 )
 
 // AttemptResponse is the (possibly truncated) upstream response to an attempt.

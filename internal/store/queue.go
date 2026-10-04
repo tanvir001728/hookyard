@@ -143,8 +143,8 @@ func (s *Store) RecoverExpiredLeases(ctx context.Context) (int64, error) {
 // of its request.
 type AttemptRecord struct {
 	Attempt model.Attempt
-	// Status is the request's new status: succeeded, failed (retry scheduled)
-	// or dead.
+	// Status is the request's new status: succeeded, failed (retry scheduled),
+	// dead or unknown.
 	Status model.Status
 	// NextAttemptAt is required when Status is failed.
 	NextAttemptAt *time.Time
@@ -160,7 +160,7 @@ type AttemptRecord struct {
 func (s *Store) RecordAttempt(ctx context.Context, rec AttemptRecord) error {
 	a := rec.Attempt
 	switch rec.Status {
-	case model.StatusSucceeded, model.StatusDead:
+	case model.StatusSucceeded, model.StatusDead, model.StatusUnknown:
 	case model.StatusFailed:
 		if rec.NextAttemptAt == nil {
 			return errors.New("record attempt: a failed request needs NextAttemptAt")
@@ -204,7 +204,7 @@ func (s *Store) RecordAttempt(ctx context.Context, rec AttemptRecord) error {
 			last_error_message = $7,
 			last_status_code = $8,
 			updated_at = now(),
-			completed_at = CASE WHEN $3 IN ('succeeded', 'dead') THEN now() END
+			completed_at = CASE WHEN $3 IN ('succeeded', 'dead', 'unknown') THEN now() END
 		WHERE id = $1 AND status = 'in_flight' AND lease_expires_at = $2`,
 		a.RequestID, rec.LeaseExpiresAt, string(rec.Status), a.Number, rec.NextAttemptAt,
 		reqErrCode, reqErrMsg, a.StatusCode)

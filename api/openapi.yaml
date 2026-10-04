@@ -273,6 +273,54 @@ paths:
         default:
           $ref: "#/components/responses/InternalError"
 
+  /v1/requests/{id}/resolve:
+    parameters:
+      - $ref: "#/components/parameters/RequestId"
+    post:
+      operationId: resolveRequest
+      tags: [Requests]
+      summary: Settle a request whose outcome is unknown
+      description: |
+        A request is `unknown` when it was sent but no response arrived, so Hookyard can't tell whether
+        the upstream processed it. After checking with the upstream, record what happened: `succeeded`,
+        or `dead` (it didn't go through; it moves to the dead-letter queue, where it can be replayed).
+        Only `unknown` requests can be resolved. Recorded in the audit log.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [outcome]
+              properties:
+                outcome:
+                  type: string
+                  enum: [succeeded, dead]
+                reason:
+                  type: string
+                  description: Why, for the audit log.
+            example:
+              outcome: succeeded
+              reason: The vendor's dashboard shows the charge.
+      responses:
+        "200":
+          description: The resolved request.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Request"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        default:
+          $ref: "#/components/responses/InternalError"
+
   /v1/dlq:
     get:
       operationId: getDLQSummary
@@ -771,8 +819,8 @@ components:
         - `failed`: the last attempt failed and a retry is scheduled (see `next_attempt_at`)
         - `succeeded`: delivered successfully (final)
         - `dead`: retries exhausted or a permanent error; in the DLQ (final)
-        - `unknown`: the outcome is uncertain, for example a timeout on a non-idempotent call (final;
-          reserved for v0.2)
+        - `unknown`: the request was sent but no response arrived, so the upstream may or may not have
+          processed it; not retried to avoid a duplicate. Settle it with `resolve`, or `replay` it (final)
         - `canceled`: canceled before delivery (final)
       enum: [scheduled, pending, in_flight, failed, succeeded, dead, unknown, canceled]
 
@@ -1000,8 +1048,10 @@ components:
           minimum: 0
         outcome:
           type: string
-          description: How Hookyard classified the attempt.
-          enum: [success, retryable_failure, permanent_failure]
+          description: |
+            How Hookyard classified the attempt. `unknown` means the request was sent but no response
+            arrived (see the request's `unknown` status).
+          enum: [success, retryable_failure, permanent_failure, unknown]
         status_code:
           type: [integer, "null"]
         error:
@@ -1118,7 +1168,7 @@ components:
 
     Upstream:
       type: object
-      required: [name, base_url, timeout, retry, header_names, limits, state]
+      required: [name, base_url, timeout, retry, header_names, limits, state, on_timeout]
       properties:
         name:
           $ref: "#/components/schemas/UpstreamName"
@@ -1139,6 +1189,12 @@ components:
           $ref: "#/components/schemas/UpstreamLimits"
         state:
           $ref: "#/components/schemas/UpstreamState"
+        on_timeout:
+          type: string
+          enum: [unknown, retry]
+          description: |
+            What happens when a POST or PATCH was sent but no response arrived: `unknown` (wait for a
+            person or the app to settle it) or `retry` (for upstreams that deduplicate).
 
     UpstreamState:
       type: object
