@@ -10,7 +10,7 @@ when the vendor is down, and shows you everything that happened.
 [![CI](https://github.com/tanvir001728/hookyard/actions/workflows/ci.yml/badge.svg)](https://github.com/tanvir001728/hookyard/actions/workflows/ci.yml)
 [![Go Report Card](https://goreportcard.com/badge/github.com/tanvir001728/hookyard)](https://goreportcard.com/report/github.com/tanvir001728/hookyard)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Status: early development](https://img.shields.io/badge/status-early%20development-orange.svg)](#project-status)
+[![Release](https://img.shields.io/github/v/release/tanvir001728/hookyard?include_prereleases)](https://github.com/tanvir001728/hookyard/releases)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
 [Why Hookyard](#why-hookyard) •
@@ -26,9 +26,10 @@ when the vendor is down, and shows you everything that happened.
 ## Project status
 
 > [!WARNING]
-> Hookyard is in **early development** and is **not ready for production use**.
-> The APIs shown below are the planned design and may change before `v1.0`.
-> Follow the [milestones](https://github.com/tanvir001728/hookyard/milestones) to track progress.
+> Hookyard is **early**: [v0.1.0](https://github.com/tanvir001728/hookyard/releases/tag/v0.1.0) is the
+> first release. Try it, and please [report issues](https://github.com/tanvir001728/hookyard/issues), but
+> expect APIs to change before `v1.0`. Follow the
+> [milestones](https://github.com/tanvir001728/hookyard/milestones) to see what's next.
 
 ## Why Hookyard
 
@@ -61,12 +62,13 @@ Hookyard moves all of that into a single self-hosted service. Your application c
                                       └──────────────────────────────────────┘
 ```
 
-- **Async by design.** Apps enqueue a request and get an id back immediately. The outcome arrives by
-  signed callback, or you poll for it.
-- **Nothing gets lost.** When a vendor's circuit breaker opens, deliveries to it are *paused* instead of
-  failed, and the queue drains once the vendor recovers.
-- **Built-in dashboard.** See success rates, latency, queue depth, breaker state and the DLQ, and
-  replay failed requests with one click.
+- **Async by design.** Apps enqueue a request and get an id back immediately, then poll for the outcome
+  (signed callbacks are coming in v0.2).
+- **Nothing gets lost.** Requests survive restarts and crashes, and every request that can't be
+  delivered lands in the dead-letter queue with its full history, ready to replay. In v0.2, a
+  vendor's circuit breaker will *pause* its deliveries instead of failing them.
+- **Built-in dashboard.** See success rates, latency, queue depth and the DLQ, and replay failed
+  requests with one click.
 - **Self-hosted.** A single Go binary; Postgres is the only dependency.
 
 ## Quickstart
@@ -96,12 +98,11 @@ To run Hookyard against your own APIs, see [docs/configuration.md](docs/configur
 
 ## A quick look
 
-> [!NOTE]
-> These examples use the TypeScript SDK, [`@hookyard/sdk`](sdk/typescript#readme). A few options shown
-> here, such as `orderingKey`, relative DLQ filters (`since`) and pausing upstreams, are planned for
-> later milestones; the [SDK README](sdk/typescript#readme) documents what is available today.
+These examples use the TypeScript SDK, [`@hookyard/sdk`](sdk/typescript#readme). It isn't published to
+npm yet; until it is, build it from [`sdk/typescript`](sdk/typescript#readme) or call the HTTP API
+directly.
 
-**Start with three lines.** Retries, dead-lettering and circuit breaking are on by default:
+**Start with three lines.** Retries, backoff and the dead-letter queue are on by default:
 
 ```ts
 import { Hookyard } from "@hookyard/sdk";
@@ -117,29 +118,28 @@ const job = await hy.to("courier-x").post("/shipments", body, {
   dedupeKey: `order-${id}-shipment`,
   retry: "patient",            // "none" | "quick" | "standard" | "patient" | custom policy
   deliverAt: inOneHour,
-  orderingKey: `order-${id}`,
   tags: { app: "orders" },
 });
 
 const outcome = await job.result({ timeout: "30s" }); // optional: wait for the outcome
 ```
 
-The HTTP API is described in [`api/openapi.yaml`](api/openapi.yaml) (OpenAPI 3.1), and all settings in
-[docs/configuration.md](docs/configuration.md).
-
-**Manage everything from code.** Anything you can do in the dashboard is also available in the API,
-the SDK and the CLI:
+**Manage everything from code.** Anything you can do in the dashboard is also available in the API
+and the SDK:
 
 ```ts
-await hy.dlq.replay({ upstream: "courier-x", since: "2h" });
-await hy.upstreams.pause("courier-x");
+const dead = await hy.dlq.summary({ upstream: "courier-x" });
+await hy.dlq.replay({ upstream: "courier-x", errorCode: "timeout" });
 ```
+
+The HTTP API is described in [`api/openapi.yaml`](api/openapi.yaml) (OpenAPI 3.1), and all settings in
+[docs/configuration.md](docs/configuration.md).
 
 ## Roadmap
 
 | Milestone | Focus |
 | --- | --- |
-| **v0.1 — Async core** | Queue, workers, retry presets, DLQ, dedupe, management API, TypeScript SDK, dashboard |
+| **v0.1 — Async core** ✅ | Queue, workers, retry presets, DLQ, dedupe, management API, TypeScript SDK, dashboard |
 | **v0.2 — Resilience** | Rate limits, circuit breaker, response classification, signed callbacks, live tail |
 | **v0.3 — Vendor realism** | Auth plugins (OAuth2, HMAC), scheduled and ordered delivery, CLI, alerting |
 | **v0.4 — Production ready** | Docs site, releases, SSO, multi-instance deployments |
