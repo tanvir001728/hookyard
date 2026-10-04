@@ -16,6 +16,10 @@ updates:
       prefix: build
     labels: ["type: dependencies"]
 
+  # TypeScript stays on 5.x: the SDK's declaration build (tsup) needs the
+  # TypeScript 5 compiler API, which TypeScript 7 (the native port) doesn't
+  # provide. @types/node stays on the oldest maintained line the SDK supports,
+  # so code can't use newer Node APIs by accident.
   - package-ecosystem: npm
     directory: /sdk/typescript
     schedule:
@@ -23,6 +27,27 @@ updates:
     commit-message:
       prefix: build
     labels: ["type: dependencies"]
+    ignore:
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
     groups:
       sdk-dev-dependencies:
         dependency-type: development
+
+  - package-ecosystem: npm
+    directory: /web
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: build
+    labels: ["type: dependencies"]
+    ignore:
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+    groups:
+      dashboard-dependencies:
+        patterns: ["*"]
