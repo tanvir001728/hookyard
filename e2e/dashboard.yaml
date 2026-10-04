@@ -7,3 +7,9 @@ upstreams:
   payments-y:
     base_url: http://127.0.0.1:9090/pay
     retry: { preset: quick, max_attempts: 2, initial_interval: 200ms }
+  # Used to produce requests whose outcome is unknown (the vendor never answers).
+  # The breaker is off so repeated test runs can't trip it.
+  hanging:
+    base_url: http://127.0.0.1:9090
+    retry: { preset: quick, max_attempts: 2, initial_interval: 200ms }
+    breaker: off

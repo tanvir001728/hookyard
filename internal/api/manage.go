@@ -139,6 +139,31 @@ func (s *Server) handleCancelRequest(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, toRequestJSON(req))
 }
 
+func (s *Server) handleResolveRequest(w http.ResponseWriter, r *http.Request) {
+	id, ok := requestID(w, r)
+	if !ok {
+		return
+	}
+	var in struct {
+		Outcome string `json:"outcome"`
+		Reason  string `json:"reason"`
+	}
+	if !s.decodeJSON(w, r, &in) {
+		return
+	}
+	outcome := model.Status(in.Outcome)
+	if outcome != model.StatusSucceeded && outcome != model.StatusDead {
+		writeValidationError(w, []fieldError{{"outcome", "must be succeeded (it went through) or dead (it didn't; move it to the DLQ)"}})
+		return
+	}
+	req, err := s.v1.Store.ResolveRequest(r.Context(), id, actorFrom(r.Context()), outcome, strings.TrimSpace(in.Reason))
+	if s.storeError(w, r, "resolve request", id, err) {
+		return
+	}
+	s.log.Info("request resolved", "id", id, "outcome", outcome, "actor", actorFrom(r.Context()))
+	writeJSON(w, http.StatusOK, toRequestJSON(req))
+}
+
 func (s *Server) handleDLQSummary(w http.ResponseWriter, r *http.Request) {
 	groups, total, err := s.v1.Store.DLQSummary(r.Context(), r.URL.Query().Get("upstream"))
 	if err != nil {
@@ -224,6 +249,7 @@ type upstreamJSON struct {
 	HeaderNames []string          `json:"header_names"`
 	Limits      limitsJSON        `json:"limits"`
 	State       upstreamStateJSON `json:"state"`
+	OnTimeout   string            `json:"on_timeout"`
 }
 
 type limitsJSON struct {
@@ -258,6 +284,7 @@ func (s *Server) toUpstreamJSON(u config.Upstream, pause *store.Pause) upstreamJ
 		HeaderNames: names,
 		Limits:      toLimitsJSON(u.Limits),
 		State:       s.upstreamState(u, pause),
+		OnTimeout:   string(u.OnTimeout),
 	}
 }
 

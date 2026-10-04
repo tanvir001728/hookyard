@@ -47,6 +47,7 @@ type defaultsSchema struct {
 	Burst          *int            `yaml:"burst"`
 	MaxConcurrency *int            `yaml:"max_concurrency"`
 	Breaker        breakerSpec     `yaml:"breaker"`
+	OnTimeout      string          `yaml:"on_timeout"`
 }
 
 type upstreamSchema struct {
@@ -60,6 +61,7 @@ type upstreamSchema struct {
 	MaxConcurrency *int              `yaml:"max_concurrency"`
 	Breaker        breakerSpec       `yaml:"breaker"`
 	Classify       []ruleSchema      `yaml:"classify"`
+	OnTimeout      string            `yaml:"on_timeout"`
 }
 
 // Defaults are the resolved global defaults that apply to every upstream.
@@ -69,7 +71,20 @@ type Defaults struct {
 	DedupeWindow time.Duration
 	Limits       Limits
 	Breaker      Breaker
+	OnTimeout    OnTimeout
 }
+
+// OnTimeout says what happens when a POST or PATCH may have reached the
+// upstream but no response came back.
+type OnTimeout string
+
+const (
+	// OnTimeoutUnknown marks the request unknown for a person or the app to
+	// settle (the default): retrying could repeat a side effect.
+	OnTimeoutUnknown OnTimeout = "unknown"
+	// OnTimeoutRetry retries anyway, for upstreams that deduplicate.
+	OnTimeoutRetry OnTimeout = "retry"
+)
 
 // Limits throttle deliveries to one upstream, per Hookyard instance.
 type Limits struct {
@@ -95,6 +110,8 @@ type Upstream struct {
 	Breaker      Breaker
 	// Classify rules decide how responses count; empty means the defaults.
 	Classify classify.Rules
+	// OnTimeout applies to ambiguous failures of POST and PATCH requests.
+	OnTimeout OnTimeout
 }
 
 // File is a loaded and validated configuration file.
@@ -112,7 +129,7 @@ func Empty() *File {
 
 func builtinDefaults() Defaults {
 	p, _ := retry.Preset(retry.DefaultPreset)
-	return Defaults{Timeout: DefaultTimeout, Retry: p, DedupeWindow: DefaultDedupeWindow, Breaker: Breaker{Enabled: true, Config: breaker.Defaults}}
+	return Defaults{Timeout: DefaultTimeout, Retry: p, DedupeWindow: DefaultDedupeWindow, Breaker: Breaker{Enabled: true, Config: breaker.Defaults}, OnTimeout: OnTimeoutUnknown}
 }
 
 // LoadFile reads the config file at path. If path is empty, it loads
@@ -318,6 +335,7 @@ func resolve(raw fileSchema) (*File, error) {
 	}
 	defaults.Limits = resolveLimits("defaults", Limits{}, raw.Defaults.RateLimit, raw.Defaults.Burst, raw.Defaults.MaxConcurrency, add)
 	defaults.Breaker = resolveBreaker("defaults.breaker", defaults.Breaker, raw.Defaults.Breaker, add)
+	defaults.OnTimeout = resolveOnTimeout("defaults.on_timeout", defaults.OnTimeout, raw.Defaults.OnTimeout, add)
 
 	upstreams := make([]Upstream, 0, len(raw.Upstreams))
 	for name, u := range raw.Upstreams {
@@ -330,6 +348,7 @@ func resolve(raw fileSchema) (*File, error) {
 		up.Limits = resolveLimits(prefix, defaults.Limits, u.RateLimit, u.Burst, u.MaxConcurrency, add)
 		up.Breaker = resolveBreaker(prefix+".breaker", defaults.Breaker, u.Breaker, add)
 		up.Classify = resolveRules(prefix+".classify", u.Classify, add)
+		up.OnTimeout = resolveOnTimeout(prefix+".on_timeout", defaults.OnTimeout, u.OnTimeout, add)
 
 		if base, err := parseBaseURL(u.BaseURL); err != nil {
 			add(prefix+".base_url", "%s", err)
@@ -366,6 +385,17 @@ func resolve(raw fileSchema) (*File, error) {
 		return nil, &Error{Problems: problems}
 	}
 	return &File{Defaults: defaults, Upstreams: NewRegistry(upstreams)}, nil
+}
+
+func resolveOnTimeout(field string, base OnTimeout, v string, add func(string, string, ...any)) OnTimeout {
+	switch OnTimeout(v) {
+	case "":
+		return base
+	case OnTimeoutUnknown, OnTimeoutRetry:
+		return OnTimeout(v)
+	}
+	add(field, "must be unknown or retry, got %q", v)
+	return base
 }
 
 // Upper bounds for limits, to catch typos.

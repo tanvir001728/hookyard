@@ -131,6 +131,7 @@ Names use lowercase letters, digits, `-` and `_`. Applications refer to upstream
 | `max_concurrency` | no | Maximum deliveries in flight to this upstream (1–1024) |
 | `breaker` | no | Circuit breaker settings, or `off` |
 | `classify` | no | Rules that decide how responses count (see below) |
+| `on_timeout` | no | `unknown` (default) or `retry`: what happens when a POST or PATCH was sent but no response arrived (see below) |
 | `headers` | no | Headers added to every request, typically credentials. Values are never returned by the API. `Host`, `Content-Length` and hop-by-hop headers can't be set. |
 
 ### Rate limits and concurrency
@@ -225,6 +226,27 @@ upstreams:
 A rule needs `status`, `body` or both. With `body`, it needs exactly one of `equals`, `not_equals`,
 `in` or `exists`, and it only matches JSON responses. When a rule turns a `2xx` into a failure, the
 attempt's error code is `classified_failure`. The rule's outcome also counts for the circuit breaker.
+
+### When Hookyard can't tell whether a request went through
+
+If a request was **fully sent** but no response came back (a timeout, or the connection dropping
+after sending), the upstream may or may not have processed it. Repeating a POST could then charge a
+customer twice. So for **POST and PATCH**, Hookyard marks such a request **`unknown`** instead of
+retrying it, and leaves the decision to a person or your application:
+
+- `POST /v1/requests/{id}/resolve` with `{"outcome": "succeeded"}` after confirming with the vendor,
+  or `{"outcome": "dead"}` if it didn't go through (it then moves to the dead-letter queue);
+- or replay it if you're sure a duplicate is harmless.
+
+The dashboard's request page shows a "Mark as delivered / Mark as failed" choice for these. Failures
+**before** the request was fully sent (DNS errors, refused connections) are always retried, and so
+are **GET, PUT and DELETE**, which are idempotent by definition.
+
+To retry ambiguous POST/PATCH requests anyway:
+
+- send an `Idempotency-Key` header (in the request or the upstream's `headers`) if the vendor
+  deduplicates by it, or
+- set `on_timeout: retry` on the upstream.
 
 ### Pausing an upstream
 

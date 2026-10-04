@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tanvir001728/hookyard/internal/breaker"
 	"github.com/tanvir001728/hookyard/internal/config"
 )
 
@@ -72,4 +73,52 @@ func TestLimiterBlock(t *testing.T) {
 	l.acquire("gone", t0)
 	l.release("gone")
 	l.block("gone", t0.Add(time.Hour))
+}
+
+// When a probe closes the breaker, the upstream must stay out of claims until
+// unhold: allowance() must never see "closed but not held" in between.
+func TestLimiterCloseAndHoldAreAtomic(t *testing.T) {
+	cfg := breaker.Config{FailureRate: 0.5, MinCalls: 100, Window: time.Minute, ConsecutiveFailures: 1, Cooldown: time.Millisecond, Probes: 1}
+	for round := range 1000 {
+		now := time.Unix(1000, 0)
+		l := newLimiter(testRegistry(config.Upstream{Name: "u", Breaker: config.Breaker{Enabled: true, Config: cfg}}), now)
+
+		// Open the breaker, let the cooldown pass, and send the one probe.
+		l.record("u", false, now)
+		later := now.Add(time.Second)
+		if _, caps, _ := l.allowance(later); caps["u"] != 1 {
+			t.Fatalf("round %d: half-open probe allowance = %v", round, caps)
+		}
+		l.acquire("u", later)
+
+		closed := make(chan struct{})
+		leaked := make(chan bool, 1)
+		go func() {
+			// Spin until the probe's success has been recorded.
+			for {
+				exclude, _, _ := l.allowance(later)
+				if !slices.Contains(exclude, "u") {
+					leaked <- true // claimable before unhold
+					return
+				}
+				select {
+				case <-closed:
+					leaked <- false
+					return
+				default:
+				}
+			}
+		}()
+		if tr := l.record("u", true, later); tr == nil || tr.To != breaker.Closed {
+			t.Fatalf("round %d: expected the breaker to close, got %+v", round, tr)
+		}
+		close(closed)
+		if <-leaked {
+			t.Fatalf("round %d: the upstream became claimable before its retry windows were extended", round)
+		}
+		l.unhold("u")
+		if exclude, _, _ := l.allowance(later); slices.Contains(exclude, "u") {
+			t.Fatalf("round %d: still excluded after unhold", round)
+		}
+	}
 }

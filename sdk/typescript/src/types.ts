@@ -191,7 +191,8 @@ export interface Attempt {
   startedAt: Date;
   durationMs: number;
   /** How Hookyard classified the attempt. */
-  outcome: "success" | "retryable_failure" | "permanent_failure";
+  /** `unknown`: the request was sent but no response arrived. */
+  outcome: "success" | "retryable_failure" | "permanent_failure" | "unknown";
   statusCode: number | null;
   error: DeliveryError | null;
   response: AttemptResponse | null;
@@ -279,6 +280,11 @@ export interface Upstream {
   limits: UpstreamLimits;
   /** Live delivery state on the Hookyard instance that answered. */
   state: UpstreamState;
+  /**
+   * What happens when a POST or PATCH was sent but no response arrived: `unknown` (left for a person or
+   * the app to settle) or `retry`.
+   */
+  onTimeout: "unknown" | "retry";
 }
 
 /**
@@ -429,6 +435,11 @@ export interface RequestsApi {
   replay(id: string): Promise<HookyardRequest>;
   /** Cancels a request that has not finished and is not in flight. */
   cancel(id: string): Promise<HookyardRequest>;
+  /**
+   * Settles a request whose status is `unknown` (it was sent, but no response arrived), after checking
+   * with the upstream: `succeeded`, or `dead` to move it to the dead-letter queue.
+   */
+  resolve(id: string, outcome: "succeeded" | "dead", options?: { reason?: string | undefined }): Promise<HookyardRequest>;
 }
 
 export interface DlqApi {

@@ -126,6 +126,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/requests/{id}/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Request ID. */
+                id: components["parameters"]["RequestId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Settle a request whose outcome is unknown
+         * @description A request is `unknown` when it was sent but no response arrived, so Hookyard can't tell whether
+         *     the upstream processed it. After checking with the upstream, record what happened: `succeeded`,
+         *     or `dead` (it didn't go through; it moves to the dead-letter queue, where it can be replayed).
+         *     Only `unknown` requests can be resolved. Recorded in the audit log.
+         */
+        post: operations["resolveRequest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/dlq": {
         parameters: {
             query?: never;
@@ -401,8 +427,8 @@ export interface components {
          *     - `failed`: the last attempt failed and a retry is scheduled (see `next_attempt_at`)
          *     - `succeeded`: delivered successfully (final)
          *     - `dead`: retries exhausted or a permanent error; in the DLQ (final)
-         *     - `unknown`: the outcome is uncertain, for example a timeout on a non-idempotent call (final;
-         *       reserved for v0.2)
+         *     - `unknown`: the request was sent but no response arrived, so the upstream may or may not have
+         *       processed it; not retried to avoid a duplicate. Settle it with `resolve`, or `replay` it (final)
          *     - `canceled`: canceled before delivery (final)
          * @enum {string}
          */
@@ -557,10 +583,11 @@ export interface components {
             started_at: string;
             duration_ms: number;
             /**
-             * @description How Hookyard classified the attempt.
+             * @description How Hookyard classified the attempt. `unknown` means the request was sent but no response
+             *     arrived (see the request's `unknown` status).
              * @enum {string}
              */
-            outcome: "success" | "retryable_failure" | "permanent_failure";
+            outcome: "success" | "retryable_failure" | "permanent_failure" | "unknown";
             status_code?: number | null;
             error?: components["schemas"]["DeliveryError"] | null;
             response?: components["schemas"]["AttemptResponse"] | null;
@@ -643,6 +670,12 @@ export interface components {
             header_names: string[];
             limits: components["schemas"]["UpstreamLimits"];
             state: components["schemas"]["UpstreamState"];
+            /**
+             * @description What happens when a POST or PATCH was sent but no response arrived: `unknown` (wait for a
+             *     person or the app to settle it) or `retry` (for upstreams that deduplicate).
+             * @enum {string}
+             */
+            on_timeout: "unknown" | "retry";
         };
         /** @description Live delivery state of the upstream on the Hookyard instance that answered. */
         UpstreamState: {
@@ -1136,6 +1169,49 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            default: components["responses"]["InternalError"];
+        };
+    };
+    resolveRequest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Request ID. */
+                id: components["parameters"]["RequestId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                /**
+                 * @example {
+                 *       "outcome": "succeeded",
+                 *       "reason": "The vendor's dashboard shows the charge."
+                 *     }
+                 */
+                "application/json": {
+                    /** @enum {string} */
+                    outcome: "succeeded" | "dead";
+                    /** @description Why, for the audit log. */
+                    reason?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The resolved request. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Request"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
             default: components["responses"]["InternalError"];
         };
     };

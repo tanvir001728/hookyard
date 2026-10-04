@@ -132,12 +132,21 @@ test.describe("dead letters", () => {
 
   test.beforeEach(async ({ request }, testInfo) => {
     // 4xx is a permanent failure, so these go straight to the DLQ.
+    const headers = { Authorization: `Bearer ${token}` };
+    const ids: string[] = [];
     for (let i = 0; i < 2; i++) {
       const res = await request.post("/v1/requests", {
-        headers: { Authorization: `Bearer ${token}` },
+        headers,
         data: { upstream: "payments-y", method: "POST", path: `/e2e-dead?status=${statusFor(testInfo.project.name)}` },
       });
       expect(res.status()).toBe(202);
+      ids.push((await res.json()).id);
+    }
+    // Wait until they are actually dead, so the tests don't depend on timing.
+    for (const id of ids) {
+      await expect
+        .poll(async () => (await (await request.get(`/v1/requests/${id}`, { headers })).json()).status, { timeout: 10_000 })
+        .toBe("dead");
     }
   });
 
@@ -185,4 +194,28 @@ test("no page scrolls sideways on a phone", async ({ page, isMobile }) => {
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     expect(overflow, `${path} overflows horizontally`).toBeLessThanOrEqual(0);
   }
+});
+
+test("an unknown request explains itself and can be resolved", async ({ page, request }) => {
+  // A POST to an endpoint that hangs past its timeout: sent, but no response.
+  const res = await request.post("/v1/requests", {
+    headers: { Authorization: `Bearer ${token}` },
+    data: { upstream: "hanging", method: "POST", path: `/charge?hang=1&key=${Date.now()}`, timeout: "300ms", body: { amount: 5 } },
+  });
+  const { id } = await res.json();
+
+  await signIn(page);
+  await page.goto(`/requests/${id}`);
+  await expect(page.getByText("Did this go through? Hookyard can't tell.")).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText("No response", { exact: true })).toBeVisible(); // the attempt badge
+
+  await page.getByRole("button", { name: "Mark as delivered" }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByRole("button", { name: "Mark as delivered" })).toBeDisabled(); // a reason is required
+  await dialog.getByLabel("Reason (for the audit log)").fill("Vendor dashboard shows the charge");
+  await dialog.getByRole("button", { name: "Mark as delivered" }).click();
+
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByText("Succeeded").first()).toBeVisible();
+  await expect(page.getByText("Did this go through?")).toHaveCount(0);
 });

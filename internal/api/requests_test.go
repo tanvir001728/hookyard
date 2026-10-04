@@ -29,6 +29,7 @@ upstreams:
       Authorization: "Bearer secret-never-exposed"
   payments-y:
     base_url: https://payments.example
+    on_timeout: retry
 `
 
 type testAPI struct {

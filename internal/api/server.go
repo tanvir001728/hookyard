@@ -104,6 +104,7 @@ func (s *Server) routes() {
 		v1("GET /v1/requests/{id}/attempts", s.handleListAttempts)
 		v1("POST /v1/requests/{id}/replay", s.handleReplayRequest)
 		v1("POST /v1/requests/{id}/cancel", s.handleCancelRequest)
+		v1("POST /v1/requests/{id}/resolve", s.handleResolveRequest)
 		v1("GET /v1/dlq", s.handleDLQSummary)
 		v1("POST /v1/dlq/replay", s.handleDLQReplay)
 		v1("GET /v1/upstreams", s.handleListUpstreams)

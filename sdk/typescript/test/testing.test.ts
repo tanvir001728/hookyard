@@ -192,3 +192,15 @@ describe("fake upstream pauses", () => {
     await expect(fake.upstreams.events("courier-x")).resolves.toEqual([]);
   });
 });
+
+describe("fake unknown outcomes", () => {
+  it("can produce unknown requests and resolve them", async () => {
+    const fake = createFakeHookyard({ outcomes: { "payments-y": "unknown" } });
+    const job = await fake.to("payments-y").post("/charge", { amount: 5 });
+    const req = await job.result();
+    expect(req.status).toBe("unknown");
+
+    await expect(fake.requests.resolve(req.id, "succeeded")).resolves.toMatchObject({ status: "succeeded", lastError: null });
+    await expect(fake.requests.resolve(req.id, "dead")).rejects.toMatchObject({ code: "invalid_state" });
+  });
+});

@@ -48,6 +48,14 @@ func PolicyDecider(rnd func() float64) Decider {
 		switch {
 		case outcome == model.OutcomeSuccess:
 			return Decision{Outcome: outcome, Status: model.StatusSucceeded}
+		case res.Ambiguous && !res.SafeToRepeat:
+			// The upstream may have processed it: repeating could charge a
+			// customer twice. A person or the app has to settle it.
+			return Decision{Outcome: model.OutcomeUnknown, Status: model.StatusUnknown, LastError: &model.DeliveryError{
+				Code: res.Error.Code,
+				Message: res.Error.Message + "; the request was sent but no response arrived, so it may have been processed. " +
+					"Not retried to avoid a duplicate (add an Idempotency-Key header or set on_timeout: retry to retry these). Resolve or replay it.",
+			}}
 		case outcome == model.OutcomePermanentFailure:
 			return Decision{Outcome: outcome, Status: model.StatusDead}
 		case n >= req.Retry.MaxAttempts:

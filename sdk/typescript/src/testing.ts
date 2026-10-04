@@ -299,6 +299,7 @@ export function createFakeHookyard(options: FakeHookyardOptions = {}): FakeHooky
       retry: { ...PRESETS.standard },
       headerNames: [],
       limits: { rateLimit: null, burst: null, maxConcurrency: null },
+      onTimeout: "unknown",
       state: {
         status: pause ? "paused" : "active",
         breaker: "closed",
@@ -344,6 +345,20 @@ export function createFakeHookyard(options: FakeHookyardOptions = {}): FakeHooky
         const snapshot = clone(entry.request);
         deliver(entry);
         return snapshot;
+      },
+      async resolve(id, outcome) {
+        const entry = find(id);
+        const { status } = entry.request;
+        if (status !== "unknown") throw invalidState("resolve", status, "unknown");
+        const now = new Date();
+        Object.assign(entry.request, {
+          status: outcome,
+          completedAt: now,
+          updatedAt: now,
+          nextAttemptAt: null,
+          lastError: outcome === "succeeded" ? null : entry.request.lastError,
+        });
+        return clone(entry.request);
       },
       async cancel(id) {
         const entry = find(id);

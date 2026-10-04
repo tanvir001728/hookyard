@@ -220,6 +220,7 @@ describe("upstreams", () => {
     header_names: ["Authorization"],
     limits: { rate_limit: "10/s", burst: 10, max_concurrency: null },
     state: { status: "active", breaker: "closed", breaker_since: null, pause: null, in_flight: 1, available_tokens: 9, throttled_until: null },
+    on_timeout: "unknown",
   };
   const mapped = {
     name: "courier-x",
@@ -229,6 +230,7 @@ describe("upstreams", () => {
     headerNames: ["Authorization"],
     limits: { rateLimit: "10/s", burst: 10, maxConcurrency: null },
     state: { status: "active", breaker: "closed", breakerSince: null, pause: null, inFlight: 1, availableTokens: 9, throttledUntil: null },
+    onTimeout: "unknown",
   };
 
   it("list() returns the upstreams", async () => {
@@ -356,6 +358,7 @@ describe("upstream pause, resume and events", () => {
     header_names: [],
     limits: { rate_limit: null, burst: null, max_concurrency: null },
     state: stateWire,
+    on_timeout: "retry",
   };
 
   it("pause() sends the reason and duration and maps the state", async () => {
@@ -387,5 +390,15 @@ describe("upstream pause, resume and events", () => {
     const events = await client(fetch).upstreams.events("courier-x", { limit: 5 });
     expect(calls[0]?.url.search).toBe("?limit=5");
     expect(events[0]).toEqual({ id: 2, at: new Date("2026-10-04T10:05:00Z"), kind: "breaker_open", reason: "5 consecutive failures", actor: "hookyard", details: {} });
+  });
+});
+
+describe("requests.resolve", () => {
+  it("posts the outcome and reason, and is not retried", async () => {
+    const { fetch, calls } = mockFetch(json(409, { error: { code: "invalid_state", message: "cannot resolve a request that is succeeded (allowed: unknown)" } }));
+    await expect(client(fetch).requests.resolve("req_01", "succeeded", { reason: "vendor confirmed" })).rejects.toBeInstanceOf(InvalidStateError);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url.pathname).toBe("/v1/requests/req_01/resolve");
+    expect(calls[0]?.body).toEqual({ outcome: "succeeded", reason: "vendor confirmed" });
   });
 });

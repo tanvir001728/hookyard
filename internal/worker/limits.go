@@ -111,23 +111,25 @@ func (l *limiter) acquire(upstream string, now time.Time) {
 // outcomes that say something about the upstream's health should be
 // reported: successes and retryable failures.
 func (l *limiter) record(upstream string, success bool, now time.Time) *transition {
+	// Hold l.mu across the breaker update: allowance() also holds it while
+	// reading breaker state, so it can never see a just-closed breaker before
+	// the upstream is held.
 	l.mu.Lock()
+	defer l.mu.Unlock()
 	u := l.upstreams[upstream]
-	l.mu.Unlock()
 	if u == nil || u.breaker == nil {
 		return nil
 	}
-	if t := u.breaker.Record(success, now); t != nil {
-		if t.To == breaker.Closed {
-			// Don't claim this upstream's requests until their retry windows
-			// have been extended; a claim would carry the stale window.
-			l.mu.Lock()
-			u.held = true
-			l.mu.Unlock()
-		}
-		return &transition{upstream, t}
+	t := u.breaker.Record(success, now)
+	if t == nil {
+		return nil
 	}
-	return nil
+	if t.To == breaker.Closed {
+		// Don't claim this upstream's requests until their retry windows have
+		// been extended; a claim would carry the stale window.
+		u.held = true
+	}
+	return &transition{upstream, t}
 }
 
 // unhold lets a held upstream be claimed again.

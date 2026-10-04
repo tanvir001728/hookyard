@@ -2,6 +2,7 @@ package worker
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -74,5 +75,31 @@ func TestPolicyDecider(t *testing.T) {
 				t.Errorf("LastError = %+v, want code %s", d.LastError, tt.wantErrCode)
 			}
 		})
+	}
+}
+
+func TestPolicyDeciderAmbiguous(t *testing.T) {
+	now := time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)
+	req := model.Request{Retry: model.RetryPolicy{MaxAttempts: 5, InitialInterval: time.Second, MaxInterval: time.Minute, Multiplier: 2, MaxAge: time.Hour}, RetryWindowStart: now}
+	decide := PolicyDecider(func() float64 { return 0.5 })
+	timeout := &model.DeliveryError{Code: ErrCodeTimeout, Message: "no response within 5s"}
+
+	tests := []struct {
+		name string
+		res  AttemptResult
+		want model.Status
+	}{
+		{"sent, no response, unsafe", AttemptResult{Error: timeout, Ambiguous: true}, model.StatusUnknown},
+		{"sent, no response, safe to repeat", AttemptResult{Error: timeout, Ambiguous: true, SafeToRepeat: true}, model.StatusFailed},
+		{"never sent", AttemptResult{Error: timeout}, model.StatusFailed},
+	}
+	for _, tt := range tests {
+		d := decide(req, 1, tt.res, now)
+		if d.Status != tt.want {
+			t.Errorf("%s: status %s, want %s", tt.name, d.Status, tt.want)
+		}
+		if tt.want == model.StatusUnknown && (d.Outcome != model.OutcomeUnknown || d.LastError == nil || !strings.Contains(d.LastError.Message, "may have been processed")) {
+			t.Errorf("%s: decision %+v", tt.name, d)
+		}
 	}
 }

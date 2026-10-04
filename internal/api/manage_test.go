@@ -36,9 +36,14 @@ func (a *testAPI) deliverAll(status model.Status, code int) {
 			Duration: 42 * time.Millisecond, Outcome: model.OutcomeSuccess, StatusCode: &code,
 			Response: &model.AttemptResponse{Headers: map[string]string{"Content-Type": "application/json"}, Body: `{"ok":true}`},
 		}
-		if status == model.StatusDead {
+		switch status {
+		case model.StatusDead:
 			att.Outcome = model.OutcomePermanentFailure
 			att.Error = &model.DeliveryError{Code: "http_status", Message: "upstream responded with 400 Bad Request"}
+		case model.StatusUnknown:
+			att.Outcome, att.StatusCode, att.Response = model.OutcomeUnknown, nil, nil
+			att.Error = &model.DeliveryError{Code: "timeout", Message: "no response within 5s"}
+		default:
 		}
 		if err := a.srv.v1.Store.RecordAttempt(ctx, store.AttemptRecord{Attempt: att, Status: status, LeaseExpiresAt: c.LeaseExpiresAt}); err != nil {
 			a.t.Fatal(err)
@@ -208,6 +213,9 @@ func TestUpstreams(t *testing.T) {
 	if lim := list.Data[0].Limits; lim.RateLimit == nil || *lim.RateLimit != "5/s" || *lim.Burst != 5 || lim.MaxConcurrency == nil || *lim.MaxConcurrency != 3 {
 		t.Errorf("courier-x limits = %+v", lim)
 	}
+	if list.Data[0].OnTimeout != "unknown" || list.Data[1].OnTimeout != "retry" {
+		t.Errorf("on_timeout = %q, %q", list.Data[0].OnTimeout, list.Data[1].OnTimeout)
+	}
 	if lim := list.Data[1].Limits; lim.RateLimit != nil || lim.Burst != nil || lim.MaxConcurrency != nil {
 		t.Errorf("payments-y has no limits: %+v", lim)
 	}
@@ -224,5 +232,38 @@ func TestUpstreams(t *testing.T) {
 	var e apiError
 	if rec := a.do(http.MethodGet, "/v1/upstreams/courier-y", "", &e); rec.Code != http.StatusNotFound || !strings.Contains(e.Error.Message, `did you mean "courier-x"`) {
 		t.Errorf("unknown upstream: %d %+v", rec.Code, e)
+	}
+}
+
+func TestResolveUnknown(t *testing.T) {
+	t.Parallel()
+	a := newTestAPI(t)
+	unknown := a.enqueue(`{"upstream":"courier-x","method":"POST","path":"/charge"}`)
+	other := a.enqueue(`{"upstream":"courier-x","method":"POST","path":"/charge"}`)
+	a.deliverAll(model.StatusUnknown, 0)
+
+	var e apiError
+	if rec := a.do(http.MethodPost, "/v1/requests/"+unknown.ID+"/resolve", `{"outcome":"maybe"}`, &e); rec.Code != http.StatusUnprocessableEntity {
+		t.Errorf("invalid outcome: %d", rec.Code)
+	}
+
+	var got requestJSON
+	rec := a.do(http.MethodPost, "/v1/requests/"+unknown.ID+"/resolve", `{"outcome":"succeeded","reason":"vendor confirmed the charge"}`, &got)
+	if rec.Code != http.StatusOK || got.Status != model.StatusSucceeded || got.LastError != nil || got.CompletedAt == nil {
+		t.Fatalf("resolve succeeded: %d %+v", rec.Code, got)
+	}
+	if rec := a.do(http.MethodPost, "/v1/requests/"+unknown.ID+"/resolve", `{"outcome":"dead"}`, &e); rec.Code != http.StatusConflict ||
+		!strings.Contains(e.Error.Message, "allowed: unknown") {
+		t.Errorf("resolve twice: %d %+v", rec.Code, e)
+	}
+
+	rec = a.do(http.MethodPost, "/v1/requests/"+other.ID+"/resolve", `{"outcome":"dead"}`, &got)
+	if rec.Code != http.StatusOK || got.Status != model.StatusDead || got.LastError == nil {
+		t.Errorf("resolve dead keeps the error: %d %+v", rec.Code, got)
+	}
+
+	audit, _ := a.srv.v1.Store.ListAudit(context.Background(), "request", unknown.ID, 5)
+	if len(audit) != 1 || audit[0].Action != "resolve" || !strings.Contains(string(audit[0].Details), "vendor confirmed") {
+		t.Errorf("audit = %+v", audit)
 	}
 }
