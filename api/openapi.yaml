@@ -986,7 +986,7 @@ components:
 
     Upstream:
       type: object
-      required: [name, base_url, timeout, retry, header_names]
+      required: [name, base_url, timeout, retry, header_names, limits]
       properties:
         name:
           $ref: "#/components/schemas/UpstreamName"
@@ -1003,6 +1003,28 @@ components:
           description: Names of headers added to every request. Values are not returned because they often contain secrets.
           items: { type: string }
           example: [Authorization, X-Api-Version]
+        limits:
+          $ref: "#/components/schemas/UpstreamLimits"
+
+    UpstreamLimits:
+      type: object
+      description: |
+        Throttling for deliveries to this upstream, applied by each Hookyard instance. Requests over
+        the limits wait in the queue.
+      required: [rate_limit, burst, max_concurrency]
+      properties:
+        rate_limit:
+          type: [string, "null"]
+          description: Sustained rate, such as `10/s` or `600/m`, or `null` for unlimited.
+          example: 10/s
+        burst:
+          type: [integer, "null"]
+          description: Requests that may be sent at once after a quiet period, or `null` without a rate limit.
+          example: 10
+        max_concurrency:
+          type: [integer, "null"]
+          description: Maximum deliveries in flight at once, or `null` for unlimited.
+          example: 4
 
     UpstreamList:
       type: object

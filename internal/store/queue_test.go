@@ -27,7 +27,7 @@ func TestClaimDue(t *testing.T) {
 		}
 	}
 
-	claims, err := s.ClaimDue(ctx, 2, 30*time.Second)
+	claims, err := s.ClaimDue(ctx, store.ClaimOptions{Limit: 2, LeaseMargin: 30 * time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,12 +47,49 @@ func TestClaimDue(t *testing.T) {
 		}
 	}
 
-	rest, err := s.ClaimDue(ctx, 10, 30*time.Second)
+	rest, err := s.ClaimDue(ctx, store.ClaimOptions{Limit: 10, LeaseMargin: 30 * time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(rest) != 1 {
 		t.Fatalf("second claim got %d, want the 1 remaining due request", len(rest))
+	}
+}
+
+func TestClaimDueCapsAndExclusions(t *testing.T) {
+	t.Parallel()
+	s := storetest.New(t)
+	ctx := t.Context()
+	for _, up := range []string{"a", "a", "a", "b", "b", "c"} {
+		if _, _, err := s.CreateRequest(ctx, newRequest(func(in *store.NewRequest) { in.Upstream = up })); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	count := func(claims []store.Claim) map[string]int {
+		m := map[string]int{}
+		for _, c := range claims {
+			m[c.Request.Upstream]++
+		}
+		return m
+	}
+
+	// a is capped at 1, c is excluded, b is unlimited.
+	claims, err := s.ClaimDue(ctx, store.ClaimOptions{Limit: 10, LeaseMargin: time.Minute, Caps: map[string]int{"a": 1}, Exclude: []string{"c"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := count(claims); got["a"] != 1 || got["b"] != 2 || got["c"] != 0 {
+		t.Errorf("claimed per upstream = %v, want a:1 b:2 c:0", got)
+	}
+
+	// A cap of 0 claims nothing for that upstream; the overall limit still applies.
+	claims, err = s.ClaimDue(ctx, store.ClaimOptions{Limit: 1, LeaseMargin: time.Minute, Caps: map[string]int{"a": 0}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := count(claims); len(claims) != 1 || got["c"] != 1 {
+		t.Errorf("claimed = %v, want only c (limit 1, a capped at 0)", got)
 	}
 }
 
@@ -78,7 +115,7 @@ func TestClaimDueConcurrentNeverOverlaps(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for {
-				claims, err := s.ClaimDue(ctx, 3, time.Minute)
+				claims, err := s.ClaimDue(ctx, store.ClaimOptions{Limit: 3, LeaseMargin: time.Minute})
 				if err != nil {
 					t.Error(err)
 					return
@@ -114,7 +151,7 @@ func TestRecordAttempt(t *testing.T) {
 	if _, _, err := s.CreateRequest(ctx, newRequest()); err != nil {
 		t.Fatal(err)
 	}
-	claims, err := s.ClaimDue(ctx, 1, time.Minute)
+	claims, err := s.ClaimDue(ctx, store.ClaimOptions{Limit: 1, LeaseMargin: time.Minute})
 	if err != nil || len(claims) != 1 {
 		t.Fatalf("claim: %v %v", claims, err)
 	}
@@ -147,7 +184,7 @@ func TestRecordAttempt(t *testing.T) {
 	}
 
 	// Not due yet, so it can't be claimed again.
-	if again, _ := s.ClaimDue(ctx, 1, time.Minute); len(again) != 0 {
+	if again, _ := s.ClaimDue(ctx, store.ClaimOptions{Limit: 1, LeaseMargin: time.Minute}); len(again) != 0 {
 		t.Error("a request with a future retry must not be claimed")
 	}
 
@@ -165,7 +202,7 @@ func TestRecordAttemptFencing(t *testing.T) {
 	if _, _, err := s.CreateRequest(ctx, newRequest()); err != nil {
 		t.Fatal(err)
 	}
-	stale, err := s.ClaimDue(ctx, 1, time.Minute)
+	stale, err := s.ClaimDue(ctx, store.ClaimOptions{Limit: 1, LeaseMargin: time.Minute})
 	if err != nil || len(stale) != 1 {
 		t.Fatal(err)
 	}
@@ -180,7 +217,7 @@ func TestRecordAttemptFencing(t *testing.T) {
 		t.Fatalf("after recovery: %+v %v", recovered, err)
 	}
 
-	fresh, err := s.ClaimDue(ctx, 1, time.Minute)
+	fresh, err := s.ClaimDue(ctx, store.ClaimOptions{Limit: 1, LeaseMargin: time.Minute})
 	if err != nil || len(fresh) != 1 {
 		t.Fatalf("reclaim: %v %v", fresh, err)
 	}

@@ -26,7 +26,7 @@ func (a *testAPI) enqueue(body string) requestJSON {
 func (a *testAPI) deliverAll(status model.Status, code int) {
 	a.t.Helper()
 	ctx := context.Background()
-	claims, err := a.srv.v1.Store.ClaimDue(ctx, 100, time.Minute)
+	claims, err := a.srv.v1.Store.ClaimDue(ctx, store.ClaimOptions{Limit: 100, LeaseMargin: time.Minute})
 	if err != nil {
 		a.t.Fatal(err)
 	}
@@ -205,6 +205,12 @@ func TestUpstreams(t *testing.T) {
 		Data []upstreamJSON `json:"data"`
 	}
 	a.do(http.MethodGet, "/v1/upstreams", "", &list)
+	if lim := list.Data[0].Limits; lim.RateLimit == nil || *lim.RateLimit != "5/s" || *lim.Burst != 5 || lim.MaxConcurrency == nil || *lim.MaxConcurrency != 3 {
+		t.Errorf("courier-x limits = %+v", lim)
+	}
+	if lim := list.Data[1].Limits; lim.RateLimit != nil || lim.Burst != nil || lim.MaxConcurrency != nil {
+		t.Errorf("payments-y has no limits: %+v", lim)
+	}
 	if len(list.Data) != 2 || list.Data[0].Name != "courier-x" || list.Data[0].Retry.Preset != "patient" || list.Data[0].Timeout.Std() != 15*time.Second {
 		t.Errorf("upstreams = %+v", list.Data)
 	}

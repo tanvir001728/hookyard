@@ -213,6 +213,7 @@ describe("upstreams", () => {
     timeout: "15s",
     retry: retryWire,
     header_names: ["Authorization"],
+    limits: { rate_limit: "10/s", burst: 10, max_concurrency: null },
   };
   const mapped = {
     name: "courier-x",
@@ -220,6 +221,7 @@ describe("upstreams", () => {
     timeout: "15s",
     retry: { preset: "quick", maxAttempts: 5, initialInterval: "1s", maxInterval: "30s", multiplier: 2, maxAge: "10m" },
     headerNames: ["Authorization"],
+    limits: { rateLimit: "10/s", burst: 10, maxConcurrency: null },
   };
 
   it("list() returns the upstreams", async () => {

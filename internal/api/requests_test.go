@@ -23,6 +23,8 @@ upstreams:
     timeout: 15s
     retry: patient
     dedupe_window: 1h
+    rate_limit: 300/m
+    max_concurrency: 3
     headers:
       Authorization: "Bearer secret-never-exposed"
   payments-y:
