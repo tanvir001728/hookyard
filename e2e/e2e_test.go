@@ -12,6 +12,8 @@ package e2e
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -30,8 +32,12 @@ import (
 
 const token = "e2e-token-0123456789"
 
-// callbackSecret signs completion callbacks.
-const callbackSecret = "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw"
+// callbackSecret signs completion callbacks; random for every run.
+var callbackSecret = func() string {
+	b := make([]byte, 32)
+	_, _ = rand.Read(b)
+	return "whsec_" + base64.StdEncoding.EncodeToString(b)
+}()
 
 var stack struct {
 	bin      string // directory with the built binaries
