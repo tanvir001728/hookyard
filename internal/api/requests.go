@@ -42,7 +42,13 @@ type createRequestBody struct {
 	Timeout   *string           `json:"timeout"`
 	Retry     *retry.Spec       `json:"retry"`
 	Tags      map[string]string `json:"tags"`
+	// CallbackURL overrides the upstream's default; "" turns callbacks off.
+	CallbackURL *string `json:"callback_url"`
+	OnResult    *string `json:"on_result"`
 }
+
+// maxOnResultLength limits on_result, mirrored in api/openapi.yaml.
+const maxOnResultLength = 128
 
 func (s *Server) handleCreateRequest(w http.ResponseWriter, r *http.Request) {
 	var in createRequestBody
@@ -56,7 +62,7 @@ func (s *Server) handleCreateRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	nr, problems := buildNewRequest(in, upstream, time.Now())
+	nr, problems := buildNewRequest(in, upstream, s.callbackOptions(), time.Now())
 	if len(problems) > 0 {
 		writeValidationError(w, problems)
 		return
@@ -81,7 +87,7 @@ func (s *Server) handleCreateRequest(w http.ResponseWriter, r *http.Request) {
 
 // buildNewRequest validates the body and resolves it against the upstream's
 // configuration. It reports every invalid field.
-func buildNewRequest(in createRequestBody, up config.Upstream, now time.Time) (store.NewRequest, []fieldError) {
+func buildNewRequest(in createRequestBody, up config.Upstream, cb callbackOptions, now time.Time) (store.NewRequest, []fieldError) {
 	var problems []fieldError
 	add := func(field, format string, args ...any) {
 		problems = append(problems, fieldError{Field: field, Message: fmt.Sprintf(format, args...)})
@@ -164,8 +170,30 @@ func buildNewRequest(in createRequestBody, up config.Upstream, now time.Time) (s
 		}
 	}
 
+	callbackURL := up.CallbackURL
+	if in.CallbackURL != nil {
+		callbackURL = *in.CallbackURL
+		if callbackURL != "" {
+			if err := cb.Config.CheckCallbackURL(callbackURL); err != nil {
+				add("callback_url", "%s", err)
+			}
+		}
+	}
+	if callbackURL != "" && !cb.Enabled {
+		add("callback_url", "callbacks are disabled: set HOOKYARD_CALLBACK_SECRETS on the server to sign them")
+	}
+	var onResult string
+	if in.OnResult != nil {
+		onResult = *in.OnResult
+		if n := utf8.RuneCountInString(onResult); n < 1 || n > maxOnResultLength {
+			add("on_result", "must be between 1 and %d characters", maxOnResultLength)
+		}
+	}
+
 	slices.SortStableFunc(problems, func(a, b fieldError) int { return strings.Compare(a.Field, b.Field) })
 	return store.NewRequest{
+		CallbackURL:  callbackURL,
+		OnResult:     onResult,
 		Upstream:     in.Upstream,
 		Method:       method,
 		Path:         in.Path,
@@ -256,6 +284,8 @@ type requestJSON struct {
 	CreatedAt      time.Time         `json:"created_at"`
 	UpdatedAt      time.Time         `json:"updated_at"`
 	CompletedAt    *time.Time        `json:"completed_at"`
+	CallbackURL    *string           `json:"callback_url"`
+	OnResult       *string           `json:"on_result"`
 }
 
 type retryPolicyJSON struct {
@@ -294,6 +324,12 @@ func toRequestJSON(r model.Request) requestJSON {
 	}
 	if r.DedupeKey != "" {
 		out.DedupeKey = &r.DedupeKey
+	}
+	if r.CallbackURL != "" {
+		out.CallbackURL = &r.CallbackURL
+	}
+	if r.OnResult != "" {
+		out.OnResult = &r.OnResult
 	}
 	if r.LastError != nil {
 		out.LastError = &deliveryError{Code: r.LastError.Code, Message: r.LastError.Message}

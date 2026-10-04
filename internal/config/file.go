@@ -15,6 +15,7 @@ import (
 	"go.yaml.in/yaml/v3"
 
 	"github.com/tanvir001728/hookyard/internal/breaker"
+	"github.com/tanvir001728/hookyard/internal/callback"
 	"github.com/tanvir001728/hookyard/internal/classify"
 	"github.com/tanvir001728/hookyard/internal/model"
 	"github.com/tanvir001728/hookyard/internal/ratelimit"
@@ -35,6 +36,7 @@ const (
 
 // fileSchema is the YAML layout of hookyard.yaml.
 type fileSchema struct {
+	Callbacks callbacksSchema           `yaml:"callbacks"`
 	Defaults  defaultsSchema            `yaml:"defaults"`
 	Upstreams map[string]upstreamSchema `yaml:"upstreams"`
 }
@@ -48,6 +50,7 @@ type defaultsSchema struct {
 	MaxConcurrency *int            `yaml:"max_concurrency"`
 	Breaker        breakerSpec     `yaml:"breaker"`
 	OnTimeout      string          `yaml:"on_timeout"`
+	CallbackURL    string          `yaml:"callback_url"`
 }
 
 type upstreamSchema struct {
@@ -62,6 +65,7 @@ type upstreamSchema struct {
 	Breaker        breakerSpec       `yaml:"breaker"`
 	Classify       []ruleSchema      `yaml:"classify"`
 	OnTimeout      string            `yaml:"on_timeout"`
+	CallbackURL    *string           `yaml:"callback_url"`
 }
 
 // Defaults are the resolved global defaults that apply to every upstream.
@@ -72,6 +76,8 @@ type Defaults struct {
 	Limits       Limits
 	Breaker      Breaker
 	OnTimeout    OnTimeout
+	// CallbackURL is the default callback URL; empty for none.
+	CallbackURL string
 }
 
 // OnTimeout says what happens when a POST or PATCH may have reached the
@@ -112,19 +118,23 @@ type Upstream struct {
 	Classify classify.Rules
 	// OnTimeout applies to ambiguous failures of POST and PATCH requests.
 	OnTimeout OnTimeout
+	// CallbackURL is the default callback URL for its requests; empty for
+	// none.
+	CallbackURL string
 }
 
 // File is a loaded and validated configuration file.
 type File struct {
 	// Path is where the file was loaded from, or empty if none was loaded.
 	Path      string
+	Callbacks Callbacks
 	Defaults  Defaults
 	Upstreams *Registry
 }
 
 // Empty returns a configuration with built-in defaults and no upstreams.
 func Empty() *File {
-	return &File{Defaults: builtinDefaults(), Upstreams: NewRegistry(nil)}
+	return &File{Callbacks: Callbacks{Timeout: callback.DefaultTimeout, MaxAttempts: callback.DefaultMaxAttempts}, Defaults: builtinDefaults(), Upstreams: NewRegistry(nil)}
 }
 
 func builtinDefaults() Defaults {
@@ -336,6 +346,13 @@ func resolve(raw fileSchema) (*File, error) {
 	defaults.Limits = resolveLimits("defaults", Limits{}, raw.Defaults.RateLimit, raw.Defaults.Burst, raw.Defaults.MaxConcurrency, add)
 	defaults.Breaker = resolveBreaker("defaults.breaker", defaults.Breaker, raw.Defaults.Breaker, add)
 	defaults.OnTimeout = resolveOnTimeout("defaults.on_timeout", defaults.OnTimeout, raw.Defaults.OnTimeout, add)
+	callbacks := resolveCallbacks(raw.Callbacks, add)
+	if raw.Defaults.CallbackURL != "" {
+		defaults.CallbackURL = raw.Defaults.CallbackURL
+		if err := callbacks.CheckCallbackURL(defaults.CallbackURL); err != nil {
+			add("defaults.callback_url", "%s", err)
+		}
+	}
 
 	upstreams := make([]Upstream, 0, len(raw.Upstreams))
 	for name, u := range raw.Upstreams {
@@ -344,7 +361,16 @@ func resolve(raw fileSchema) (*File, error) {
 			add(prefix, "invalid name: use lowercase letters, digits, '-' and '_' (up to 63 characters, starting with a letter or digit)")
 		}
 
-		up := Upstream{Name: name, Timeout: defaults.Timeout, Retry: defaults.Retry, DedupeWindow: defaults.DedupeWindow}
+		up := Upstream{Name: name, Timeout: defaults.Timeout, Retry: defaults.Retry, DedupeWindow: defaults.DedupeWindow, CallbackURL: defaults.CallbackURL}
+		if u.CallbackURL != nil {
+			// An empty string turns off the default for this upstream.
+			up.CallbackURL = *u.CallbackURL
+			if up.CallbackURL != "" {
+				if err := callbacks.CheckCallbackURL(up.CallbackURL); err != nil {
+					add(prefix+".callback_url", "%s", err)
+				}
+			}
+		}
 		up.Limits = resolveLimits(prefix, defaults.Limits, u.RateLimit, u.Burst, u.MaxConcurrency, add)
 		up.Breaker = resolveBreaker(prefix+".breaker", defaults.Breaker, u.Breaker, add)
 		up.Classify = resolveRules(prefix+".classify", u.Classify, add)
@@ -384,7 +410,7 @@ func resolve(raw fileSchema) (*File, error) {
 		sort.Strings(problems)
 		return nil, &Error{Problems: problems}
 	}
-	return &File{Defaults: defaults, Upstreams: NewRegistry(upstreams)}, nil
+	return &File{Callbacks: callbacks, Defaults: defaults, Upstreams: NewRegistry(upstreams)}, nil
 }
 
 func resolveOnTimeout(field string, base OnTimeout, v string, add func(string, string, ...any)) OnTimeout {

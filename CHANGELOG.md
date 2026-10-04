@@ -17,6 +17,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Signed completion callbacks: set `callback_url` (per request, or a default per upstream) and
+  Hookyard POSTs an event to your app when the request succeeds, dies, becomes unknown or is
+  canceled. Events are signed following Standard Webhooks with `HOOKYARD_CALLBACK_SECRETS` (rotation
+  supported), retried with backoff until your app answers `2xx`, queued durably with the request, and
+  shown on the dashboard's request page. `on_result` carries a routing key, `callbacks.allow`
+  restricts where callbacks may go, and `GET /v1/requests/{id}/callbacks` and
+  `POST …/callbacks/{callback_id}/retry` inspect and resend them.
 - `POST /v1/requests/{id}/resolve` to settle `unknown` requests, the `on_timeout` upstream setting,
   and "Mark as delivered / Mark as failed" on the dashboard's request page.
 

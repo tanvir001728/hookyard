@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getRouteApi, Link } from "@tanstack/react-router";
 import { ArrowLeft, Ban, CheckCircle2, ChevronDown, Clock, HelpCircle, RotateCcw, XCircle } from "lucide-react";
+import { CallbacksCard } from "@/components/callbacks-card";
 import { PageHeader } from "@/components/layout/app-shell";
 import { ResolveDialog, type Resolution } from "@/components/resolve-dialog";
 import { finalStatuses, StatusBadge } from "@/components/status-badge";
@@ -276,6 +277,8 @@ export function RequestDetailPage() {
             </CardContent>
           </Card>
 
+          {r.callback_url && <CallbacksCard requestId={r.id} url={r.callback_url} finished={replayable} />}
+
           <Card>
             <CardHeader>
               <CardTitle>Request</CardTitle>
@@ -345,6 +348,11 @@ export function RequestDetailPage() {
                 {r.retry.preset ?? "custom"} · {r.retry.initial_interval}–{r.retry.max_interval}, ×{r.retry.multiplier}, max age {r.retry.max_age}
               </Field>
               <Field label="Timeout">{r.timeout}</Field>
+              {r.on_result && (
+                <Field label="On result">
+                  <span className="font-mono text-xs">{r.on_result}</span>
+                </Field>
+              )}
               <Field label="Dedupe key">{r.dedupe_key ? <span className="font-mono text-xs">{r.dedupe_key}</span> : "—"}</Field>
               <Field label="Tags">
                 {Object.keys(r.tags).length ? (

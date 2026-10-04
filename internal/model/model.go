@@ -116,6 +116,10 @@ type Request struct {
 	RetryAttemptBase int
 	LastError        *DeliveryError
 	LastStatusCode   *int
+	// CallbackURL receives an event when the request finishes; empty for none.
+	CallbackURL string
+	// OnResult is an app-defined key carried in the callback event.
+	OnResult string
 
 	CreatedAt   time.Time
 	UpdatedAt   time.Time

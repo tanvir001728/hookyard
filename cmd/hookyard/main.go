@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/tanvir001728/hookyard/internal/api"
+	"github.com/tanvir001728/hookyard/internal/callback"
 	"github.com/tanvir001728/hookyard/internal/config"
 	"github.com/tanvir001728/hookyard/internal/logging"
 	"github.com/tanvir001728/hookyard/internal/model"
@@ -146,6 +147,12 @@ func serve(ctx context.Context, args []string, stderr io.Writer) error {
 		log.Info("loaded config", "file", file.Path, "upstreams", file.Upstreams.Names())
 	}
 
+	if len(cfg.CallbackSecrets) == 0 {
+		if name := upstreamWithCallback(file); name != "" {
+			return fmt.Errorf("invalid configuration: %s sets callback_url, but HOOKYARD_CALLBACK_SECRETS is not set (generate a secret with: echo \"whsec_$(openssl rand -base64 32)\")", name)
+		}
+	}
+
 	db, err := openStore(ctx, cfg)
 	if err != nil {
 		return err
@@ -159,17 +166,39 @@ func serve(ctx context.Context, args []string, stderr io.Writer) error {
 	}
 
 	collector := stats.NewCollector(log, db)
+	var dispatcher *callback.Dispatcher
+	notifyCallbacks := func() {}
+	if len(cfg.CallbackSecrets) > 0 {
+		dispatcher = callback.NewDispatcher(log, db, callback.Config{
+			Secrets:      cfg.CallbackSecrets,
+			Timeout:      file.Callbacks.Timeout,
+			MaxAttempts:  file.Callbacks.MaxAttempts,
+			PollInterval: cfg.PollInterval,
+		})
+		notifyCallbacks = dispatcher.Notify
+	}
 	engine := worker.New(log, db, file.Upstreams, worker.Config{
 		Workers:      cfg.Workers,
 		PollInterval: cfg.PollInterval,
 		LeaseMargin:  cfg.LeaseMargin,
 		DrainTimeout: cfg.ShutdownTimeout,
-		Observer:     collector.Observe,
+		Observer: func(upstream string, at time.Time, d time.Duration, outcome model.AttemptOutcome, status model.Status) {
+			collector.Observe(upstream, at, d, outcome, status)
+			if status.Final() {
+				notifyCallbacks()
+			}
+		},
 	})
 	engineCtx, stopEngine := context.WithCancel(ctx)
 	defer stopEngine()
 	engineDone := make(chan error, 1)
 	go func() { engineDone <- engine.Run(engineCtx) }()
+	dispatcherDone := make(chan error, 1)
+	if dispatcher != nil {
+		go func() { dispatcherDone <- dispatcher.Run(engineCtx) }()
+	} else {
+		dispatcherDone <- nil
+	}
 
 	// Background maintenance stops with the process; the collector flushes
 	// once more after the engine has drained.
@@ -183,7 +212,10 @@ func serve(ctx context.Context, args []string, stderr io.Writer) error {
 
 	apiOpts := []api.Option{
 		api.WithReadinessCheck("database", db.Ping),
-		api.WithV1(api.V1{Store: db, Config: file, Tokens: cfg.APITokens, MaxBody: cfg.MaxBodyBytes, Notify: engine.Notify, Monitor: engine}),
+		api.WithV1(api.V1{
+			Store: db, Config: file, Tokens: cfg.APITokens, MaxBody: cfg.MaxBodyBytes, Notify: engine.Notify, Monitor: engine,
+			CallbacksEnabled: dispatcher != nil, NotifyCallbacks: notifyCallbacks,
+		}),
 	}
 	if cfg.Metrics {
 		apiOpts = append(apiOpts, api.WithMetrics(collector.MetricsHandler(upstreamGauges(db, file.Upstreams, engine))))
@@ -209,6 +241,7 @@ func serve(ctx context.Context, args []string, stderr io.Writer) error {
 	case err := <-errCh:
 		stopEngine()
 		<-engineDone
+		<-dispatcherDone
 		stopCollector()
 		<-collectorDone
 		return fmt.Errorf("http server: %w", err)
@@ -222,6 +255,7 @@ func serve(ctx context.Context, args []string, stderr io.Writer) error {
 	// while the HTTP server finishes open requests.
 	httpErr := srv.Shutdown(shutdownCtx)
 	engineErr := <-engineDone
+	<-dispatcherDone
 	stopCollector()
 	<-collectorDone
 	if err := errors.Join(httpErr, engineErr); err != nil {
@@ -229,6 +263,20 @@ func serve(ctx context.Context, args []string, stderr io.Writer) error {
 	}
 	log.Info("shutdown complete")
 	return nil
+}
+
+// upstreamWithCallback names a config entry that sets a callback URL, or
+// returns "" if none does.
+func upstreamWithCallback(file *config.File) string {
+	if file.Defaults.CallbackURL != "" {
+		return "defaults"
+	}
+	for _, u := range file.Upstreams.All() {
+		if u.CallbackURL != "" {
+			return "upstream " + u.Name
+		}
+	}
+	return ""
 }
 
 // upstreamGauges combines queue sizes and pauses from the database with the

@@ -13,6 +13,13 @@ defaults:
   retry: standard         # none | quick | standard | patient, or a policy object
   dedupe_window: 24h      # how long a dedupe_key is remembered
 
+# Completion callbacks to your apps (needs HOOKYARD_CALLBACK_SECRETS, see docs/configuration.md).
+# callbacks:
+#   allow:                # where callbacks may be sent; empty allows any http(s) URL
+#     - http://orders-svc:3000/hooks/
+#   timeout: 10s
+#   max_attempts: 12
+
 upstreams:
   # Applications refer to upstreams by name: POST /v1/requests {"upstream": "courier-x", ...}
   courier-x:
