@@ -39,6 +39,11 @@ type V1 struct {
 	Notify func()
 	// Monitor, if set, provides live upstream state and is told about pauses.
 	Monitor UpstreamMonitor
+	// CallbacksEnabled is true when callback signing secrets are configured.
+	CallbacksEnabled bool
+	// NotifyCallbacks, if set, is called after a callback may have been
+	// queued (a request was canceled or resolved, or a callback retried).
+	NotifyCallbacks func()
 }
 
 // WithDashboard serves the web dashboard h at / (for every path not handled
@@ -105,6 +110,8 @@ func (s *Server) routes() {
 		v1("POST /v1/requests/{id}/replay", s.handleReplayRequest)
 		v1("POST /v1/requests/{id}/cancel", s.handleCancelRequest)
 		v1("POST /v1/requests/{id}/resolve", s.handleResolveRequest)
+		v1("GET /v1/requests/{id}/callbacks", s.handleListCallbacks)
+		v1("POST /v1/requests/{id}/callbacks/{callback_id}/retry", s.handleRetryCallback)
 		v1("GET /v1/dlq", s.handleDLQSummary)
 		v1("POST /v1/dlq/replay", s.handleDLQReplay)
 		v1("GET /v1/upstreams", s.handleListUpstreams)

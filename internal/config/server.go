@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tanvir001728/hookyard/internal/callback"
 	"github.com/tanvir001728/hookyard/internal/logging"
 )
 
@@ -48,6 +49,9 @@ type Server struct {
 	// RequestRetention is how long finished requests are kept. Zero keeps
 	// them forever.
 	RequestRetention time.Duration
+	// CallbackSecrets sign completion callbacks; the first is the newest.
+	// Callbacks are disabled without one.
+	CallbackSecrets []callback.Secret
 }
 
 // DefaultMaxBodyBytes is the default limit for API request bodies (1 MiB).
@@ -106,6 +110,13 @@ func ServerFromEnv(lookup func(string) (string, bool)) (Server, error) {
 			return cfg, fmt.Errorf("HOOKYARD_API_TOKENS: %w", err)
 		}
 		cfg.APITokens = tokens
+	}
+	if v, ok := lookup("HOOKYARD_CALLBACK_SECRETS"); ok {
+		secrets, err := callback.ParseSecrets(v)
+		if err != nil {
+			return cfg, fmt.Errorf("HOOKYARD_CALLBACK_SECRETS: %w", err)
+		}
+		cfg.CallbackSecrets = secrets
 	}
 	if v, ok := lookup("HOOKYARD_MAX_BODY_BYTES"); ok {
 		n, err := strconv.ParseInt(v, 10, 64)

@@ -62,8 +62,9 @@ Hookyard moves all of that into a single self-hosted service. Your application c
                                       └──────────────────────────────────────┘
 ```
 
-- **Async by design.** Apps enqueue a request and get an id back immediately, then poll for the outcome
-  (signed callbacks are coming in v0.2).
+- **Async by design.** Apps enqueue a request and get an id back immediately, then get a signed
+  callback ([Standard Webhooks](https://www.standardwebhooks.com/)) when it finishes, or poll for the
+  outcome.
 - **Nothing gets lost.** Requests survive restarts and crashes, and every request that can't be
   delivered lands in the dead-letter queue with its full history, ready to replay. In v0.2, a
   vendor's circuit breaker will *pause* its deliveries instead of failing them.

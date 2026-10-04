@@ -1,6 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
 
 const token = process.env.HOOKYARD_E2E_TOKEN ?? "hookyard-dev-token";
+// flakyvendor also plays the app that receives completion callbacks.
+const vendor = process.env.HOOKYARD_E2E_VENDOR ?? "http://127.0.0.1:9090";
 
 async function signIn(page: Page, value = token) {
   await page.goto("/");
@@ -218,4 +220,28 @@ test("an unknown request explains itself and can be resolved", async ({ page, re
   await expect(dialog).toHaveCount(0);
   await expect(page.getByText("Succeeded").first()).toBeVisible();
   await expect(page.getByText("Did this go through?")).toHaveCount(0);
+});
+
+test("the request page shows its completion callback", async ({ page, request }) => {
+  const res = await request.post("/v1/requests", {
+    headers: { Authorization: `Bearer ${token}` },
+    data: {
+      upstream: "courier-x",
+      method: "POST",
+      path: `/shipments?key=${Date.now()}`,
+      body: { order: 1 },
+      callback_url: `${vendor}/hooks/hookyard`,
+      on_result: "order.shipment",
+    },
+  });
+  expect(res.status()).toBe(202);
+  const { id } = await res.json();
+
+  await signIn(page);
+  await page.goto(`/requests/${id}`);
+  const card = page.getByRole("region", { name: "Callbacks" });
+  await expect(card.getByText("Delivered", { exact: true })).toBeVisible({ timeout: 10_000 });
+  await expect(card.getByText("request.succeeded")).toBeVisible();
+  await expect(card.getByText(`${vendor}/hooks/hookyard`)).toBeVisible();
+  await expect(page.getByText("order.shipment", { exact: true })).toBeVisible(); // On result
 });

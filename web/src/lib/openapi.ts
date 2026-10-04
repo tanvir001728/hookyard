@@ -151,6 +151,56 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/requests/{id}/callbacks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Request ID. */
+                id: components["parameters"]["RequestId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List completion callbacks
+         * @description Returns the callbacks sent (or being sent) for a request, oldest first. A request gets one each
+         *     time it reaches a final state with a callback URL set; a replayed request can have several.
+         */
+        get: operations["listCallbacks"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/requests/{id}/callbacks/{callback_id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Request ID. */
+                id: components["parameters"]["RequestId"];
+                callback_id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry a failed callback
+         * @description Sends a `failed` callback again, with a fresh attempt budget. The event (its id and body) is
+         *     unchanged, so receivers that deduplicate on `webhook-id` handle it once. Recorded in the audit
+         *     log.
+         */
+        post: operations["retryCallback"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/dlq": {
         parameters: {
             query?: never;
@@ -379,7 +429,32 @@ export interface paths {
         trace?: never;
     };
 }
-export type webhooks = Record<string, never>;
+export interface webhooks {
+    requestFinished: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * A request finished
+         * @description Sent to the request's `callback_url` when it reaches a final state. Signed following
+         *     [Standard Webhooks](https://www.standardwebhooks.com/): verify `webhook-signature` (HMAC-SHA256
+         *     over `{webhook-id}.{webhook-timestamp}.{body}` with your `whsec_` secret) and reject old
+         *     timestamps. Answer with any 2xx status; anything else, or no answer within the timeout, is
+         *     retried with backoff. Delivery is at least once: deduplicate on `webhook-id`.
+         */
+        post: operations["requestFinished"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+}
 export interface components {
     schemas: {
         /**
@@ -515,6 +590,20 @@ export interface components {
             timeout?: components["schemas"]["Duration"];
             retry?: components["schemas"]["RetryPolicy"];
             tags?: components["schemas"]["Tags"];
+            /**
+             * Format: uri
+             * @description Where to POST a signed event when the request finishes (see the `requestFinished` webhook).
+             *     Overrides the upstream's `callback_url`; an empty string turns callbacks off for this request.
+             *     Must match `callbacks.allow` in `hookyard.yaml` when that is set, and requires
+             *     `HOOKYARD_CALLBACK_SECRETS` on the server.
+             * @example http://orders-svc:3000/hooks/hookyard
+             */
+            callback_url?: string;
+            /**
+             * @description An app-defined key carried in the callback event, to route it to a handler.
+             * @example order.shipment
+             */
+            on_result?: string;
         };
         Request: {
             id: components["schemas"]["RequestId"];
@@ -552,11 +641,79 @@ export interface components {
              * @description When the request reached a final state.
              */
             completed_at?: string | null;
+            /** @description Where the completion callback goes, or `null` for none. */
+            callback_url?: string | null;
+            /** @description The routing key carried in the callback event. */
+            on_result?: string | null;
         };
         RequestList: {
             data: components["schemas"]["Request"][];
             /** @description Cursor for the next page, or `null` on the last page. */
             next_cursor: string | null;
+        };
+        /** @description One completion event and its delivery to the application. */
+        Callback: {
+            /**
+             * @description The event id, sent as `webhook-id`. The same on every attempt.
+             * @example evt_0f6a3c2b9d8e4f5a8b7c6d5e4f3a2b1c
+             */
+            id: string;
+            request_id: components["schemas"]["RequestId"];
+            type: components["schemas"]["CallbackEventType"];
+            url: string;
+            request_status: components["schemas"]["RequestStatus"];
+            /**
+             * @description `pending` (waiting for its first or next attempt), `delivering`, `delivered` (the app answered
+             *     2xx) or `failed` (every attempt failed; retry it with `retryCallback`).
+             * @enum {string}
+             */
+            status: "pending" | "delivering" | "delivered" | "failed";
+            attempt_count: number;
+            /** Format: date-time */
+            next_attempt_at?: string | null;
+            last_status_code?: number | null;
+            last_error?: string | null;
+            /** Format: date-time */
+            last_attempt_at?: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            delivered_at?: string | null;
+        };
+        CallbackList: {
+            data: components["schemas"]["Callback"][];
+        };
+        /** @enum {string} */
+        CallbackEventType: "request.succeeded" | "request.dead" | "request.unknown" | "request.canceled";
+        /** @description The body of a completion callback. */
+        CallbackEvent: {
+            type: components["schemas"]["CallbackEventType"];
+            /**
+             * Format: date-time
+             * @description When the request finished.
+             */
+            timestamp: string;
+            data: {
+                request_id: components["schemas"]["RequestId"];
+                upstream: components["schemas"]["UpstreamName"];
+                method: components["schemas"]["HTTPMethod"];
+                path: string;
+                status: components["schemas"]["RequestStatus"];
+                on_result: string | null;
+                tags: components["schemas"]["Tags"];
+                dedupe_key: string | null;
+                attempt_count: number;
+                last_error: components["schemas"]["DeliveryError"] | null;
+                /** @description The upstream's last response, if one arrived. */
+                response: null | {
+                    status_code: number;
+                    headers: components["schemas"]["Headers"];
+                    body: string;
+                    body_truncated: boolean;
+                };
+                /** Format: date-time */
+                completed_at: string | null;
+            };
         };
         /**
          * @description - `timeout`: no response within the attempt timeout
@@ -1214,6 +1371,60 @@ export interface operations {
             default: components["responses"]["InternalError"];
         };
     };
+    listCallbacks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Request ID. */
+                id: components["parameters"]["RequestId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The callbacks. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CallbackList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            default: components["responses"]["InternalError"];
+        };
+    };
+    retryCallback: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Request ID. */
+                id: components["parameters"]["RequestId"];
+                callback_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The callback was queued again. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Callback"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            default: components["responses"]["InternalError"];
+        };
+    };
     getDLQSummary: {
         parameters: {
             query?: {
@@ -1535,6 +1746,34 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Readiness"];
                 };
+            };
+        };
+    };
+    requestFinished: {
+        parameters: {
+            query?: never;
+            header: {
+                "webhook-id": string;
+                /** @description Unix seconds when this attempt was sent. */
+                "webhook-timestamp": string;
+                /** @description One or more space-separated `v1,<base64>` signatures, one per configured secret. */
+                "webhook-signature": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CallbackEvent"];
+            };
+        };
+        responses: {
+            /** @description The app accepted the event. */
+            "2XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

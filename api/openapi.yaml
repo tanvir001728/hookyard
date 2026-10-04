@@ -51,6 +51,8 @@ tags:
     description: Enqueue outbound requests and inspect their delivery.
   - name: Dead-letter queue
     description: Inspect and replay requests that could not be delivered.
+  - name: Callbacks
+    description: Signed events Hookyard sends to your app when a request finishes.
   - name: Upstreams
     description: Configured third-party APIs.
   - name: Stats
@@ -318,6 +320,63 @@ paths:
           $ref: "#/components/responses/Conflict"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
+        default:
+          $ref: "#/components/responses/InternalError"
+
+  /v1/requests/{id}/callbacks:
+    parameters:
+      - $ref: "#/components/parameters/RequestId"
+    get:
+      operationId: listCallbacks
+      tags: [Callbacks]
+      summary: List completion callbacks
+      description: |
+        Returns the callbacks sent (or being sent) for a request, oldest first. A request gets one each
+        time it reaches a final state with a callback URL set; a replayed request can have several.
+      responses:
+        "200":
+          description: The callbacks.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CallbackList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        default:
+          $ref: "#/components/responses/InternalError"
+
+  /v1/requests/{id}/callbacks/{callback_id}/retry:
+    parameters:
+      - $ref: "#/components/parameters/RequestId"
+      - name: callback_id
+        in: path
+        required: true
+        schema:
+          type: string
+          example: evt_0f6a3c2b9d8e4f5a8b7c6d5e4f3a2b1c
+    post:
+      operationId: retryCallback
+      tags: [Callbacks]
+      summary: Retry a failed callback
+      description: |
+        Sends a `failed` callback again, with a fresh attempt budget. The event (its id and body) is
+        unchanged, so receivers that deduplicate on `webhook-id` handle it once. Recorded in the audit
+        log.
+      responses:
+        "202":
+          description: The callback was queued again.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Callback"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
         default:
           $ref: "#/components/responses/InternalError"
 
@@ -649,6 +708,46 @@ paths:
               schema:
                 $ref: "#/components/schemas/Readiness"
 
+webhooks:
+  requestFinished:
+    post:
+      operationId: requestFinished
+      tags: [Callbacks]
+      summary: A request finished
+      description: |
+        Sent to the request's `callback_url` when it reaches a final state. Signed following
+        [Standard Webhooks](https://www.standardwebhooks.com/): verify `webhook-signature` (HMAC-SHA256
+        over `{webhook-id}.{webhook-timestamp}.{body}` with your `whsec_` secret) and reject old
+        timestamps. Answer with any 2xx status; anything else, or no answer within the timeout, is
+        retried with backoff. Delivery is at least once: deduplicate on `webhook-id`.
+      parameters:
+        - name: webhook-id
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: webhook-timestamp
+          in: header
+          required: true
+          description: Unix seconds when this attempt was sent.
+          schema:
+            type: string
+        - name: webhook-signature
+          in: header
+          required: true
+          description: One or more space-separated `v1,<base64>` signatures, one per configured secret.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CallbackEvent"
+      responses:
+        "2XX":
+          description: The app accepted the event.
+
 components:
   securitySchemes:
     bearerAuth:
@@ -939,6 +1038,22 @@ components:
           $ref: "#/components/schemas/RetryPolicy"
         tags:
           $ref: "#/components/schemas/Tags"
+        callback_url:
+          type: string
+          format: uri
+          maxLength: 2048
+          description: |
+            Where to POST a signed event when the request finishes (see the `requestFinished` webhook).
+            Overrides the upstream's `callback_url`; an empty string turns callbacks off for this request.
+            Must match `callbacks.allow` in `hookyard.yaml` when that is set, and requires
+            `HOOKYARD_CALLBACK_SECRETS` on the server.
+          example: http://orders-svc:3000/hooks/hookyard
+        on_result:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: An app-defined key carried in the callback event, to route it to a handler.
+          example: order.shipment
 
     Request:
       type: object
@@ -996,6 +1111,12 @@ components:
           type: [string, "null"]
           format: date-time
           description: When the request reached a final state.
+        callback_url:
+          type: [string, "null"]
+          description: Where the completion callback goes, or `null` for none.
+        on_result:
+          type: [string, "null"]
+          description: The routing key carried in the callback event.
 
     RequestList:
       type: object
@@ -1008,6 +1129,119 @@ components:
         next_cursor:
           type: [string, "null"]
           description: Cursor for the next page, or `null` on the last page.
+
+    Callback:
+      type: object
+      description: One completion event and its delivery to the application.
+      required: [id, request_id, type, url, request_status, status, attempt_count, created_at]
+      properties:
+        id:
+          type: string
+          description: The event id, sent as `webhook-id`. The same on every attempt.
+          example: evt_0f6a3c2b9d8e4f5a8b7c6d5e4f3a2b1c
+        request_id:
+          $ref: "#/components/schemas/RequestId"
+        type:
+          $ref: "#/components/schemas/CallbackEventType"
+        url:
+          type: string
+        request_status:
+          $ref: "#/components/schemas/RequestStatus"
+        status:
+          type: string
+          enum: [pending, delivering, delivered, failed]
+          description: |
+            `pending` (waiting for its first or next attempt), `delivering`, `delivered` (the app answered
+            2xx) or `failed` (every attempt failed; retry it with `retryCallback`).
+        attempt_count:
+          type: integer
+          minimum: 0
+        next_attempt_at:
+          type: [string, "null"]
+          format: date-time
+        last_status_code:
+          type: [integer, "null"]
+        last_error:
+          type: [string, "null"]
+        last_attempt_at:
+          type: [string, "null"]
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        delivered_at:
+          type: [string, "null"]
+          format: date-time
+
+    CallbackList:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Callback"
+
+    CallbackEventType:
+      type: string
+      enum: [request.succeeded, request.dead, request.unknown, request.canceled]
+
+    CallbackEvent:
+      type: object
+      description: The body of a completion callback.
+      required: [type, timestamp, data]
+      properties:
+        type:
+          $ref: "#/components/schemas/CallbackEventType"
+        timestamp:
+          type: string
+          format: date-time
+          description: When the request finished.
+        data:
+          type: object
+          required: [request_id, upstream, method, path, status, on_result, tags, dedupe_key, attempt_count, last_error, response, completed_at]
+          properties:
+            request_id:
+              $ref: "#/components/schemas/RequestId"
+            upstream:
+              $ref: "#/components/schemas/UpstreamName"
+            method:
+              $ref: "#/components/schemas/HTTPMethod"
+            path:
+              type: string
+            status:
+              $ref: "#/components/schemas/RequestStatus"
+            on_result:
+              type: [string, "null"]
+            tags:
+              $ref: "#/components/schemas/Tags"
+            dedupe_key:
+              type: [string, "null"]
+            attempt_count:
+              type: integer
+              minimum: 0
+            last_error:
+              oneOf:
+                - $ref: "#/components/schemas/DeliveryError"
+                - type: "null"
+            response:
+              description: The upstream's last response, if one arrived.
+              oneOf:
+                - type: "null"
+                - type: object
+                  required: [status_code, headers, body, body_truncated]
+                  properties:
+                    status_code:
+                      type: integer
+                    headers:
+                      $ref: "#/components/schemas/Headers"
+                    body:
+                      type: string
+                    body_truncated:
+                      type: boolean
+            completed_at:
+              type: [string, "null"]
+              format: date-time
 
     DeliveryErrorCode:
       type: string

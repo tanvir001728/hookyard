@@ -14,6 +14,8 @@ export function enqueueBody(r: HookyardRequest): Record<string, unknown> {
   if (Object.keys(headers).length) body.headers = headers;
   if (r.body !== null && r.body !== undefined) body.body = r.body;
   if (Object.keys(r.tags).length) body.tags = r.tags;
+  if (r.callback_url) body.callback_url = r.callback_url;
+  if (r.on_result) body.on_result = r.on_result;
   return body;
 }
 

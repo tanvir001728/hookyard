@@ -30,6 +30,9 @@ import (
 
 const token = "e2e-token-0123456789"
 
+// callbackSecret signs completion callbacks.
+const callbackSecret = "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw"
+
 var stack struct {
 	bin      string // directory with the built binaries
 	dbURL    string
@@ -113,6 +116,7 @@ func startHookyard() error {
 		"HOOKYARD_POLL_INTERVAL=50ms",
 		"HOOKYARD_SHUTDOWN_TIMEOUT=10s",
 		"HOOKYARD_DASHBOARD=false",
+		"HOOKYARD_CALLBACK_SECRETS="+callbackSecret,
 	)
 	cmd.Stdout, cmd.Stderr = stack.logs, stack.logs
 	if err := cmd.Start(); err != nil {

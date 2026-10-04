@@ -14,6 +14,7 @@ export type DLQGroup = Schemas["DLQGroup"];
 export type DLQReplayRequest = Schemas["DLQReplayRequest"];
 export type DLQReplayResult = Schemas["DLQReplayResult"];
 export type RequestList = Schemas["RequestList"];
+export type Callback = Schemas["Callback"];
 
 export interface FieldProblem {
   field: string;

@@ -135,6 +135,7 @@ func (s *Server) handleCancelRequest(w http.ResponseWriter, r *http.Request) {
 	if s.storeError(w, r, "cancel request", id, err) {
 		return
 	}
+	s.notifyCallbacks()
 	s.log.Info("request canceled", "id", id, "actor", actorFrom(r.Context()))
 	writeJSON(w, http.StatusOK, toRequestJSON(req))
 }
@@ -160,6 +161,7 @@ func (s *Server) handleResolveRequest(w http.ResponseWriter, r *http.Request) {
 	if s.storeError(w, r, "resolve request", id, err) {
 		return
 	}
+	s.notifyCallbacks()
 	s.log.Info("request resolved", "id", id, "outcome", outcome, "actor", actorFrom(r.Context()))
 	writeJSON(w, http.StatusOK, toRequestJSON(req))
 }

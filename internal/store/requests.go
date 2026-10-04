@@ -30,11 +30,16 @@ type NewRequest struct {
 	Tags         map[string]string
 	// DeliverAt, when in the future, creates a scheduled request.
 	DeliverAt *time.Time
+	// CallbackURL, when set, receives an event when the request finishes.
+	CallbackURL string
+	// OnResult is an app-defined key carried in the callback event.
+	OnResult string
 }
 
 const requestColumns = `id, upstream, method, path, headers, body, dedupe_key, status, attempt_count,
 	retry, timeout_ms, tags, deliver_at, next_attempt_at, last_error_code, last_error_message,
-	last_status_code, created_at, updated_at, completed_at, retry_window_start, retry_attempt_base`
+	last_status_code, created_at, updated_at, completed_at, retry_window_start, retry_attempt_base,
+	callback_url, on_result`
 
 // CreateRequest stores a new request. If in.DedupeKey matches a live key for the
 // same upstream, no request is created: the existing one is returned and created
@@ -84,13 +89,14 @@ func (s *Store) createRequestOnce(ctx context.Context, in NewRequest) (model.Req
 
 	req, err := scanRequest(tx.QueryRow(ctx, `
 		INSERT INTO requests (id, upstream, method, path, headers, body, dedupe_key, status,
-			retry, timeout_ms, tags, deliver_at, next_attempt_at, retry_window_start)
+			retry, timeout_ms, tags, deliver_at, next_attempt_at, retry_window_start, callback_url, on_result)
 		VALUES ($1, $2, $3, $4, $5, $6::json, NULLIF($7, ''),
 			CASE WHEN $8::timestamptz > now() THEN 'scheduled' ELSE 'pending' END,
-			$9, $10, $11, $8, GREATEST($8::timestamptz, now()), GREATEST($8::timestamptz, now()))
+			$9, $10, $11, $8, GREATEST($8::timestamptz, now()), GREATEST($8::timestamptz, now()),
+			NULLIF($12, ''), NULLIF($13, ''))
 		RETURNING `+requestColumns,
 		model.NewRequestID(), in.Upstream, in.Method, in.Path, headers, body, in.DedupeKey,
-		in.DeliverAt, retry, in.Timeout.Milliseconds(), tags,
+		in.DeliverAt, retry, in.Timeout.Milliseconds(), tags, in.CallbackURL, in.OnResult,
 	))
 	if err != nil {
 		return model.Request{}, false, fmt.Errorf("insert request: %w", err)
@@ -289,6 +295,7 @@ func scanRequest(row pgx.Row, extra ...any) (model.Request, error) {
 		r                          model.Request
 		headers, tags, retry, body []byte
 		dedupeKey, errCode, errMsg *string
+		callbackURL, onResult      *string
 		status                     string
 		timeoutMS                  int64
 	)
@@ -296,7 +303,7 @@ func scanRequest(row pgx.Row, extra ...any) (model.Request, error) {
 		&r.ID, &r.Upstream, &r.Method, &r.Path, &headers, &body, &dedupeKey, &status,
 		&r.AttemptCount, &retry, &timeoutMS, &tags, &r.DeliverAt, &r.NextAttemptAt, &errCode, &errMsg,
 		&r.LastStatusCode, &r.CreatedAt, &r.UpdatedAt, &r.CompletedAt, &r.RetryWindowStart,
-		&r.RetryAttemptBase,
+		&r.RetryAttemptBase, &callbackURL, &onResult,
 	}
 	err := row.Scan(append(dest, extra...)...)
 	if err != nil {
@@ -308,6 +315,7 @@ func scanRequest(row pgx.Row, extra ...any) (model.Request, error) {
 	if dedupeKey != nil {
 		r.DedupeKey = *dedupeKey
 	}
+	r.CallbackURL, r.OnResult = deref(callbackURL), deref(onResult)
 	if body != nil {
 		r.Body = json.RawMessage(body)
 	}
@@ -423,4 +431,21 @@ func deref(s *string) string {
 		return ""
 	}
 	return *s
+}
+
+// GetAttempt returns one attempt of a request, or ErrNotFound.
+func (s *Store) GetAttempt(ctx context.Context, requestID string, number int) (model.Attempt, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT request_id, number, started_at, duration_ms, outcome, status_code, error_code,
+			error_message, response_headers, response_body, response_body_truncated, retry_at,
+			COALESCE(classified_by, '')
+		FROM attempts WHERE request_id = $1 AND number = $2`, requestID, number)
+	if err != nil {
+		return model.Attempt{}, fmt.Errorf("get attempt: %w", err)
+	}
+	a, err := pgx.CollectExactlyOneRow(rows, scanAttempt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return model.Attempt{}, ErrNotFound
+	}
+	return a, err
 }

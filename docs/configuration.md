@@ -25,6 +25,7 @@ Hookyard reads two kinds of settings:
 | `HOOKYARD_REQUEST_RETENTION` | | `720h` | How long finished requests and their attempts are kept (`0` keeps them forever) |
 | `HOOKYARD_METRICS` | | `false` | Serve Prometheus metrics at `/metrics` |
 | `HOOKYARD_DASHBOARD` | | `true` | Serve the web dashboard at `/` |
+| `HOOKYARD_CALLBACK_SECRETS` | | none | Comma-separated `whsec_…` secrets that sign completion callbacks, newest first. Callbacks are off without one (see below). |
 
 Hookyard needs **PostgreSQL 14 or newer**.
 
@@ -115,6 +116,7 @@ numbers. Hookyard refuses to start with an invalid file.
 | `rate_limit` | none | Default rate limit for every upstream (see below) |
 | `max_concurrency` | none | Default concurrency cap for every upstream |
 | `breaker` | on | Default circuit breaker settings, or `off` (see below) |
+| `callback_url` | none | Default URL for completion callbacks (see below) |
 
 ### `upstreams.<name>`
 
@@ -132,6 +134,7 @@ Names use lowercase letters, digits, `-` and `_`. Applications refer to upstream
 | `breaker` | no | Circuit breaker settings, or `off` |
 | `classify` | no | Rules that decide how responses count (see below) |
 | `on_timeout` | no | `unknown` (default) or `retry`: what happens when a POST or PATCH was sent but no response arrived (see below) |
+| `callback_url` | no | Overrides `defaults.callback_url`; `""` turns callbacks off for this upstream |
 | `headers` | no | Headers added to every request, typically credentials. Values are never returned by the API. `Host`, `Content-Length` and hop-by-hop headers can't be set. |
 
 ### Rate limits and concurrency
@@ -247,6 +250,62 @@ To retry ambiguous POST/PATCH requests anyway:
 - send an `Idempotency-Key` header (in the request or the upstream's `headers`) if the vendor
   deduplicates by it, or
 - set `on_timeout: retry` on the upstream.
+
+### Completion callbacks
+
+Instead of polling, your app can be told when a request finishes. Set `callback_url` when you enqueue
+(or as a default in the config file), and Hookyard POSTs an event to it when the request becomes
+`succeeded`, `dead`, `unknown` or `canceled`:
+
+```json
+{
+  "type": "request.succeeded",
+  "timestamp": "2026-10-04T09:12:03Z",
+  "data": {
+    "request_id": "req_01J9…", "upstream": "courier-x", "method": "POST", "path": "/shipments",
+    "status": "succeeded", "on_result": "order.shipment", "tags": {"app": "orders"},
+    "dedupe_key": "order-123-create-shipment", "attempt_count": 2, "last_error": null,
+    "response": {"status_code": 201, "headers": {"Content-Type": "application/json"}, "body": "{…}", "body_truncated": false},
+    "completed_at": "2026-10-04T09:12:03Z"
+  }
+}
+```
+
+`on_result` is any key you choose when enqueueing, to route the event to the right handler.
+
+**Signatures.** Callbacks are signed following [Standard Webhooks](https://www.standardwebhooks.com/),
+so any of its libraries can verify them: the `webhook-id`, `webhook-timestamp` and `webhook-signature`
+headers carry an HMAC-SHA256 over `{id}.{timestamp}.{body}`. Generate a secret and give it to both
+Hookyard and your app:
+
+```sh
+echo "whsec_$(openssl rand -base64 32)"
+HOOKYARD_CALLBACK_SECRETS=whsec_new,whsec_old   # rotation: sign with both until every app has the new one
+```
+
+Callbacks are off until a secret is set: Hookyard rejects a `callback_url` (and refuses to start
+with one in the config file) without it.
+
+**Delivery.** Answer with any `2xx`. Anything else, or no answer within the timeout, is retried with
+backoff (5s doubling up to an hour, twelve attempts by default, about six hours). Callbacks are queued
+in the same transaction that finishes the request, so they survive restarts, and are delivered **at
+least once**: deduplicate on `webhook-id`, which is the same on every attempt. Redirects aren't
+followed. `GET /v1/requests/{id}/callbacks` and the dashboard's request page show each callback's
+status; a `failed` one can be sent again with `POST /v1/requests/{id}/callbacks/{callback_id}/retry`.
+
+**Restricting where callbacks go.** An API client could otherwise make Hookyard POST to any address
+it can reach. List the allowed URLs to prevent that:
+
+```yaml
+callbacks:
+  allow:
+    - http://orders-svc:3000/hooks/          # this host and port, paths under /hooks/
+    - https://*.internal.example.com         # any subdomain, any path
+  timeout: 10s                               # per attempt, at most 1m
+  max_attempts: 12                           # 1–50
+defaults:
+  callback_url: http://orders-svc:3000/hooks/hookyard
+```
 
 ### Pausing an upstream
 
