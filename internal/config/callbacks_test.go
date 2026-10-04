@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/base64"
 	"net/url"
 	"strings"
 	"testing"
@@ -100,7 +101,7 @@ upstreams:
 }
 
 func TestCallbackSecretsFromEnv(t *testing.T) {
-	cfg, err := ServerFromEnv(env(map[string]string{"HOOKYARD_CALLBACK_SECRETS": "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw"}))
+	cfg, err := ServerFromEnv(env(map[string]string{"HOOKYARD_CALLBACK_SECRETS": "whsec_" + base64.StdEncoding.EncodeToString(make([]byte, 32))}))
 	if err != nil || len(cfg.CallbackSecrets) != 1 {
 		t.Fatalf("secrets = %v, %v", cfg.CallbackSecrets, err)
 	}

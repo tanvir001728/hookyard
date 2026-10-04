@@ -142,11 +142,10 @@ jobs:
           HOOKYARD_API_TOKENS: dev:hookyard-dev-token
           HOOKYARD_CONFIG: e2e/dashboard.yaml
           HOOKYARD_ADDR: 127.0.0.1:8080
-          # A test-only secret, so the browser tests can see callbacks.
-          HOOKYARD_CALLBACK_SECRETS: whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw
         run: |
           ./bin/flakyvendor -addr 127.0.0.1:9090 > "$RUNNER_TEMP/flakyvendor.log" 2>&1 &
-          ./bin/hookyard serve > "$RUNNER_TEMP/hookyard.log" 2>&1 &
+          # A throwaway signing secret, so the browser tests can see callbacks.
+          HOOKYARD_CALLBACK_SECRETS="whsec_$(openssl rand -base64 32)" ./bin/hookyard serve > "$RUNNER_TEMP/hookyard.log" 2>&1 &
           for _ in $(seq 1 30); do
             if curl -fsS http://127.0.0.1:8080/readyz; then exit 0; fi
             sleep 1
@@ -272,7 +271,8 @@ jobs:
                 initial_interval: 100ms
           EOF
           ./bin/flakyvendor -addr 127.0.0.1:9090 > "$RUNNER_TEMP/flakyvendor.log" 2>&1 &
-          ./bin/hookyard serve > "$RUNNER_TEMP/hookyard.log" 2>&1 &
+          # A throwaway signing secret, so the browser tests can see callbacks.
+          HOOKYARD_CALLBACK_SECRETS="whsec_$(openssl rand -base64 32)" ./bin/hookyard serve > "$RUNNER_TEMP/hookyard.log" 2>&1 &
           for _ in $(seq 1 30); do
             if curl -fsS http://127.0.0.1:8080/readyz; then exit 0; fi
             sleep 1

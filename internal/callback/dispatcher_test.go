@@ -17,7 +17,7 @@ import (
 	"github.com/tanvir001728/hookyard/internal/store/storetest"
 )
 
-const secret = "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw"
+var secret = callback.NewTestSecret()
 
 // receiver is an app endpoint that fails the first `fail` calls.
 type receiver struct {
