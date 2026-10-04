@@ -112,6 +112,7 @@ numbers. Hookyard refuses to start with an invalid file.
 | `dedupe_window` | `24h` | How long a `dedupe_key` is remembered, at most `720h` |
 | `rate_limit` | none | Default rate limit for every upstream (see below) |
 | `max_concurrency` | none | Default concurrency cap for every upstream |
+| `breaker` | on | Default circuit breaker settings, or `off` (see below) |
 
 ### `upstreams.<name>`
 
@@ -126,6 +127,7 @@ Names use lowercase letters, digits, `-` and `_`. Applications refer to upstream
 | `rate_limit` | no | Sustained rate such as `10/s`, `600/m` or `3600/h` |
 | `burst` | no | Requests sent at once after a quiet period (default: one second's worth, at least 1) |
 | `max_concurrency` | no | Maximum deliveries in flight to this upstream (1–1024) |
+| `breaker` | no | Circuit breaker settings, or `off` |
 | `headers` | no | Headers added to every request, typically credentials. Values are never returned by the API. `Host`, `Content-Length` and hop-by-hop headers can't be set. |
 
 ### Rate limits and concurrency
@@ -147,6 +149,41 @@ upstreams are unaffected. When an upstream answers `429` with a `Retry-After` he
 
 Limits apply per Hookyard instance. If you run several instances, divide the vendor's limit between
 them.
+
+### Circuit breaker
+
+When a vendor is down, retrying every request against it wastes attempts and floods it as it recovers.
+Each upstream has a circuit breaker, **on by default**:
+
+- **Closed** (normal): outcomes are counted over a sliding `window`. The breaker **opens** when at
+  least `min_calls` calls were seen and the failure rate reaches `failure_rate`, or after
+  `consecutive_failures` failures in a row.
+- **Open**: deliveries to that upstream **pause**. Requests wait in the queue: they don't use up
+  attempts, and the paused time doesn't count against their `max_age`.
+- **Half-open**: after `cooldown`, up to `probes` requests are sent. If they all succeed the breaker
+  closes and the queue drains; if one fails it opens again.
+
+Only retryable failures count (timeouts, connection errors, `429`, `5xx`). A vendor rejecting a bad
+request with `400` is healthy, so it doesn't trip the breaker.
+
+```yaml
+upstreams:
+  courier-x:
+    base_url: https://api.courier-x.example
+    breaker:                  # all fields optional; defaults shown
+      failure_rate: 0.5
+      min_calls: 20
+      window: 1m
+      consecutive_failures: 5
+      cooldown: 30s
+      probes: 3
+  internal-api:
+    base_url: http://internal.example
+    breaker: off
+```
+
+Every transition is logged and kept in the upstream's history. Breaker state is per Hookyard
+instance.
 
 ### Retry policies
 

@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tanvir001728/hookyard/internal/breaker"
 	"github.com/tanvir001728/hookyard/internal/config"
 	"github.com/tanvir001728/hookyard/internal/model"
 	"github.com/tanvir001728/hookyard/internal/store"
@@ -120,7 +121,8 @@ func (e *Engine) Run(ctx context.Context) error {
 		free := cap(slots) - len(slots)
 		claimed := 0
 		if free > 0 {
-			exclude, caps := e.limits.allowance(e.now())
+			exclude, caps, changes := e.limits.allowance(e.now())
+			e.applyTransitions(ctx, changes...)
 			claims, err := e.store.ClaimDue(ctx, store.ClaimOptions{Limit: free, LeaseMargin: e.cfg.LeaseMargin, Exclude: exclude, Caps: caps})
 			if err != nil && !errors.Is(err, context.Canceled) {
 				e.log.Error("claiming requests failed", "error", err)
@@ -208,6 +210,40 @@ func (e *Engine) recoverLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+		}
+	}
+}
+
+// applyTransitions logs and records circuit breaker transitions. When a
+// breaker closes, waiting requests get back the time they spent paused, so
+// it doesn't count against their max_age.
+func (e *Engine) applyTransitions(ctx context.Context, changes ...transition) {
+	for _, t := range changes {
+		log := e.log.With("upstream", t.upstream, "from", t.From, "to", t.To, "reason", t.Reason)
+		details := map[string]any{"from": string(t.From), "to": string(t.To)}
+		switch t.To {
+		case breaker.Open:
+			log.Warn("circuit breaker opened; deliveries to this upstream are paused")
+		case breaker.HalfOpen:
+			log.Info("circuit breaker half-open; sending probe requests")
+		case breaker.Closed:
+			n, err := e.store.ExtendRetryWindows(ctx, t.upstream, t.OpenSince)
+			if err != nil {
+				log.Error("extending retry windows after the breaker closed failed", "error", err)
+			}
+			e.limits.unhold(t.upstream)
+			details["paused_for"] = t.At.Sub(t.OpenSince).String()
+			details["requests_extended"] = n
+			log.Info("circuit breaker closed; deliveries resume", "paused_for", t.At.Sub(t.OpenSince), "requests_extended", n)
+		}
+		err := e.store.AddUpstreamEvent(ctx, store.UpstreamEvent{
+			Upstream: t.upstream, At: t.At, Kind: "breaker_" + string(t.To), Reason: t.Reason, Details: details,
+		})
+		if err != nil {
+			log.Error("recording the breaker transition failed", "error", err)
+		}
+		if t.To != breaker.Open {
+			e.Notify()
 		}
 	}
 }

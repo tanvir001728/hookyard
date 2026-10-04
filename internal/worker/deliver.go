@@ -102,6 +102,14 @@ func (e *Engine) deliver(ctx context.Context, c store.Claim) {
 		e.cfg.Observer(req.Upstream, finished, attempt.Duration, d.Outcome, d.Status)
 	}
 
+	// Tell the upstream's circuit breaker how it's doing. Permanent failures
+	// (such as 400 for a bad request) say nothing about its health.
+	if d.Outcome != model.OutcomePermanentFailure {
+		if t := e.limits.record(req.Upstream, d.Outcome == model.OutcomeSuccess, finished); t != nil {
+			e.applyTransitions(ctx, *t)
+		}
+	}
+
 	attrs := []any{"status", d.Status, "http_status", result.StatusCode, "duration", attempt.Duration}
 	if result.Error != nil {
 		attrs = append(attrs, "error", result.Error.Message)
