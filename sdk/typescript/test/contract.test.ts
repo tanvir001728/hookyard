@@ -13,7 +13,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { AuthError, Hookyard, NotFoundError, UnknownUpstreamError, ValidationError } from "../src/index.js";
-import type { CallbackEvent, UpstreamStats } from "../src/index.js";
+import type { CallbackDelivery, CallbackEvent, UpstreamStats } from "../src/index.js";
 
 const url = process.env["HOOKYARD_URL"];
 const token = process.env["HOOKYARD_TOKEN"];
@@ -238,7 +238,13 @@ describe.skipIf(!live || !callbackSecret)("contract: completion callbacks", () =
       });
       expect(received[0]?.data.response?.statusCode).toBe(200);
 
-      const [delivery] = await hy.requests.callbacks(job.id);
+      // The route runs before the handler answers, so Hookyard records the delivery a moment later.
+      let delivery: CallbackDelivery | undefined;
+      for (let i = 0; i < 50; i++) {
+        [delivery] = await hy.requests.callbacks(job.id);
+        if (delivery?.status === "delivered") break;
+        await new Promise((r) => setTimeout(r, 100));
+      }
       expect(delivery).toMatchObject({ id: received[0]?.id, status: "delivered", lastStatusCode: 204, attemptCount: 1 });
     } finally {
       await new Promise((resolve) => server.close(resolve));
