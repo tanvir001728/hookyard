@@ -209,6 +209,8 @@ describe("sending requests", () => {
       createdAt: new Date("2026-09-29T10:00:00Z"),
       updatedAt: new Date("2026-09-29T10:00:00Z"),
       completedAt: new Date("2026-09-29T10:05:00Z"),
+      callbackUrl: null,
+      onResult: null,
     });
   });
 });

@@ -35,6 +35,8 @@ export function toSdk(r: HookyardRequest): string {
   const options: Record<string, unknown> = {};
   if (Object.keys(headers).length) options.headers = headers;
   if (Object.keys(r.tags).length) options.tags = r.tags;
+  if (r.callback_url) options.callbackUrl = r.callback_url;
+  if (r.on_result) options.onResult = r.on_result;
   const opts = Object.keys(options).length ? JSON.stringify(options, null, 2) : "";
 
   const args = [JSON.stringify(r.path)];

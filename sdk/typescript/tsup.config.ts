@@ -12,4 +12,7 @@ export default defineConfig({
   target: "node18",
   platform: "neutral",
   treeshake: true,
+  // Only loaded on Node.js 18, which lacks a global Web Crypto.
+  external: ["node:crypto"],
+  removeNodeProtocol: false,
 });

@@ -1,8 +1,11 @@
 import { toMilliseconds, toWireDuration, toWireTimestamp } from "./duration.js";
 import type { components } from "./generated/openapi.js";
 import { Job } from "./job.js";
+import { createCallbackHandler, verifyCallback } from "./callbacks.js";
+import type { CallbackEvent, CallbackHandler, CallbackHandlerOptions, CallbackInput, CallbackRoutes, CallbackSecret } from "./callbacks.js";
 import {
   fromWireAttempt,
+  fromWireCallback,
   fromWireDlqReplayResult,
   fromWireDlqSummary,
   fromWireRequest,
@@ -19,6 +22,7 @@ import { Transport } from "./transport.js";
 import type { FetchFunction } from "./transport.js";
 import type {
   Attempt,
+  CallbackDelivery,
   DlqApi,
   DlqReplayFilter,
   DlqReplayResult,
@@ -59,6 +63,11 @@ export interface HookyardOptions {
    * `5xx`. Retrying never creates duplicate requests. Default `2`; `0` disables retries.
    */
   maxRetries?: number | undefined;
+  /**
+   * Secret(s) for verifying completion callbacks: one of the server's `HOOKYARD_CALLBACK_SECRETS`.
+   * Defaults to `HOOKYARD_CALLBACK_SECRET`. Only needed by apps that receive callbacks.
+   */
+  callbackSecret?: CallbackSecret | undefined;
 }
 
 const DEFAULT_TIMEOUT_MS = 10_000;
@@ -112,6 +121,7 @@ export class Hookyard implements HookyardClient {
 
   readonly #transport: Transport;
   readonly #maxRetries: number;
+  readonly #callbackSecret: CallbackSecret | undefined;
 
   constructor(options: HookyardOptions = {}) {
     const url = options.url ?? readEnv("HOOKYARD_URL");
@@ -141,6 +151,7 @@ export class Hookyard implements HookyardClient {
     }
 
     this.#maxRetries = maxRetries;
+    this.#callbackSecret = options.callbackSecret;
     this.#transport = new Transport({ baseUrl: normalizeUrl(url), token, fetch: fetchFn, timeoutMs, maxRetries });
 
     const transport = this.#transport;
@@ -196,6 +207,19 @@ export class Hookyard implements HookyardClient {
         // Not retried: a retry after a resolve that went through would report a conflict.
         const res = await transport.call<Schemas["Request"]>({ method: "POST", path: `/v1/requests/${enc(id)}/resolve`, body, retry: false });
         return fromWireRequest(res.data);
+      },
+      async callbacks(id: string): Promise<CallbackDelivery[]> {
+        const res = await transport.call<Schemas["CallbackList"]>({ method: "GET", path: `/v1/requests/${enc(id)}/callbacks`, retry: true });
+        return res.data.data.map(fromWireCallback);
+      },
+      async retryCallback(id: string, callbackId: string): Promise<CallbackDelivery> {
+        // Not retried: a retry after a retry that went through would report a conflict.
+        const res = await transport.call<Schemas["Callback"]>({
+          method: "POST",
+          path: `/v1/requests/${enc(id)}/callbacks/${enc(callbackId)}/retry`,
+          retry: false,
+        });
+        return fromWireCallback(res.data);
       },
     };
 
@@ -286,6 +310,30 @@ export class Hookyard implements HookyardClient {
   /** Base URL of the Hookyard server this client talks to. */
   get url(): string {
     return this.#transport.baseUrl;
+  }
+
+  /**
+   * Verifies a completion callback's signature and returns its event. Throws a
+   * `CallbackVerificationError` if it isn't a genuine, recent callback from Hookyard.
+   */
+  verifyCallback(input: CallbackInput, options: { tolerance?: Duration | undefined } = {}): Promise<CallbackEvent> {
+    return verifyCallback(input, { ...options, secret: this.#callbackSecret });
+  }
+
+  /**
+   * Creates an endpoint for completion callbacks that verifies them and routes each event by its
+   * `onResult` key (or, without one, its upstream) and final status.
+   *
+   * ```ts
+   * const hooks = hy.handler({
+   *   "order.shipment": { succeeded: (e) => markShipped(e), dead: (e) => alertOps(e) },
+   * });
+   * export const POST = hooks.fetch;              // Next.js App Router
+   * app.post("/hooks/hookyard", hooks.node);      // Express (before express.json())
+   * ```
+   */
+  handler(routes: CallbackRoutes, options: Omit<CallbackHandlerOptions, "secret"> = {}): CallbackHandler {
+    return createCallbackHandler(routes, { ...options, secret: this.#callbackSecret });
   }
 
   to(upstream: string): UpstreamClient {

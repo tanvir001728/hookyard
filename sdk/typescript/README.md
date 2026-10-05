@@ -10,6 +10,8 @@ dead-letter queue.
 - **Zero runtime dependencies.** Uses the global `fetch` in Node.js 18+ (and other modern runtimes).
 - **Fully typed.** Strict TypeScript, camelCase types, `Date` objects for timestamps.
 - **Safe to retry.** The SDK retries its own calls to Hookyard without ever creating duplicate requests.
+- **Callbacks in a few lines.** `hy.handler()` verifies signed completion callbacks and routes them,
+  with adapters for Express, Next.js, NestJS, Node.js and any Fetch API runtime.
 - **Easy to test.** An in-memory fake ships in `@hookyard/sdk/testing`.
 
 > [!WARNING]
@@ -22,6 +24,7 @@ dead-letter queue.
 - [Configuration](#configuration)
 - [Sending requests](#sending-requests)
 - [Waiting for the outcome](#waiting-for-the-outcome)
+- [Handling completion callbacks](#handling-completion-callbacks)
 - [Managing requests, the DLQ, upstreams and stats](#management-api)
 - [Error handling](#error-handling)
 - [Transport retries and deduplication](#transport-retries-and-deduplication)
@@ -60,6 +63,7 @@ const hy = new Hookyard({
   timeout: "10s",               // per HTTP call to Hookyard (not to the upstream)
   maxRetries: 2,                // SDK → Hookyard retries; 0 disables them
   fetch: customFetch,           // default: the global fetch
+  callbackSecret: "whsec_…",    // default: process.env.HOOKYARD_CALLBACK_SECRET
 });
 ```
 
@@ -70,6 +74,7 @@ const hy = new Hookyard({
 | `timeout` | `"10s"` | Timeout of each HTTP call to Hookyard. A duration string or milliseconds. |
 | `maxRetries` | `2` | How often a failed call to Hookyard is retried (network errors, timeouts, `429`, `5xx`). |
 | `fetch` | global `fetch` | A custom `fetch`, for example to add tracing or a proxy agent. |
+| `callbackSecret` | `HOOKYARD_CALLBACK_SECRET` | Verifies [completion callbacks](#handling-completion-callbacks): one of the server's `HOOKYARD_CALLBACK_SECRETS` (an array, or comma-separated, during a rotation). |
 
 The constructor throws a `TypeError` with a clear message if the URL or token is missing or invalid.
 
@@ -106,6 +111,8 @@ const job = await hy.to("courier-x").post("/shipments", body, {
   timeout: "15s",
   headers: { "X-Correlation-Id": correlationId },
   tags: { app: "orders", tenant: "acme" },
+  callbackUrl: "http://orders-svc:3000/hooks/hookyard",
+  onResult: "order.shipment",
 });
 ```
 
@@ -117,6 +124,8 @@ const job = await hy.to("courier-x").post("/shipments", body, {
 | `timeout` | `string \| number` | Per-attempt timeout for the call to the upstream, overriding the upstream's. |
 | `headers` | `Record<string, string>` | Headers for this request. Headers configured on the upstream (usually credentials) take precedence. |
 | `tags` | `Record<string, string>` | Labels for filtering and grouping, such as the calling app or tenant (up to 20). |
+| `callbackUrl` | `string` | Where Hookyard POSTs a signed event when the request finishes. Overrides the upstream's `callback_url`; `""` turns it off. See [callbacks](#handling-completion-callbacks). |
+| `onResult` | `string` | A routing key carried in the callback event, matched by `hy.handler()` routes. |
 
 **Durations** are strings with a unit (`"500ms"`, `"30s"`, `"5m"`, `"1h30m"`) or a number of
 milliseconds (`1500` is sent as `"1500ms"`). Invalid values throw a `TypeError` before anything is sent.
@@ -188,6 +197,93 @@ if (outcome.status === "succeeded") {
 
 Statuses: `scheduled` → `pending` → `in_flight` → `succeeded`, or `failed` (a retry is scheduled) and
 eventually `dead`. `isFinalStatus(status)` tells you whether a status is final.
+
+## Handling completion callbacks
+
+Instead of polling, let Hookyard tell your app when a request finishes. Send with a `callbackUrl`
+(or set one per upstream in `hookyard.yaml`) and an `onResult` key, then mount a handler:
+
+```ts
+const hy = new Hookyard(); // reads HOOKYARD_CALLBACK_SECRET too
+
+await hy.to("courier-x").post("/shipments", { orderId: 123 }, {
+  callbackUrl: "http://orders-svc:3000/hooks/hookyard",
+  onResult: "order.shipment",
+  tags: { orderId: "123" },
+});
+
+export const hooks = hy.handler({
+  "order.shipment": {
+    succeeded: async (e) => markShipped(e.data.tags.orderId, JSON.parse(e.data.response!.body)),
+    dead: async (e) => alertOps(`shipment failed: ${e.data.lastError?.message}`),
+    unknown: async (e) => openTicket(e.data.requestId), // sent, but no response: check with the vendor
+  },
+});
+```
+
+The handler verifies each callback's [Standard Webhooks](https://www.standardwebhooks.com/)
+signature and timestamp, then routes the event by its `onResult` key (or, without one, its upstream
+name, then `"*"`) and its final status: `succeeded`, `dead`, `unknown` or `canceled`. A route can also
+be a single function for every status. It answers:
+
+- `204` when your handler finished, or when no route matched (the event is acknowledged and dropped;
+  pass `onUnhandled` to see these);
+- `500` when your handler threw, so Hookyard retries the callback later with backoff;
+- `401` when the signature is wrong or the timestamp is more than 5 minutes off.
+
+Callbacks are delivered **at least once**: if your handler has side effects, deduplicate on
+`event.id`, which stays the same across retries.
+
+**Express** — mount it before `express.json()`, or give its route `express.raw()`: the signature
+covers the raw body.
+
+```ts
+app.post("/hooks/hookyard", hooks.node);
+// or, after a global express.json():
+app.post("/hooks/hookyard", express.raw({ type: "application/json" }), hooks.node);
+```
+
+**Next.js (App Router)**
+
+```ts
+// app/hooks/hookyard/route.ts
+export const POST = hooks.fetch;
+```
+
+**NestJS** — create the app with `rawBody: true`:
+
+```ts
+// main.ts: NestFactory.create(AppModule, { rawBody: true })
+@Controller("hooks")
+export class HookyardController {
+  @Post("hookyard")
+  @HttpCode(204)
+  async receive(@Req() req: RawBodyRequest<Request>) {
+    await hooks.handle({ headers: req.headers, body: req.rawBody! }); // throws on a bad signature or handler error
+  }
+}
+```
+
+**Plain Node.js, Fastify, Hono, Bun, Deno, Cloudflare Workers**
+
+```ts
+http.createServer(hooks.node).listen(3000);           // Node.js
+app.post("/hooks/hookyard", (c) => hooks.fetch(c.req.raw)); // Hono
+```
+
+**Verifying by hand.** `await hy.verifyCallback(request)` takes a Fetch API `Request`, or
+`{ headers, body }` with the raw body, and returns the typed event or throws a
+`CallbackVerificationError`. Apps that only receive callbacks don't need a Hookyard URL or token:
+
+```ts
+import { createCallbackHandler, verifyCallback } from "@hookyard/sdk";
+
+const hooks = createCallbackHandler(routes, { secret: process.env.HOOKYARD_CALLBACK_SECRET });
+const event = await verifyCallback(request, { secret: process.env.HOOKYARD_CALLBACK_SECRET });
+```
+
+`hy.requests.callbacks(id)` lists a request's callbacks and their delivery status, and
+`hy.requests.retryCallback(id, callbackId)` sends a failed one again.
 
 ## Management API
 
@@ -361,6 +457,18 @@ it("ships the order", async () => {
 
 - `createFakeHookyard({ upstreams: ["courier-x"] })` rejects other upstreams with an
   `UnknownUpstreamError`, like a real server. The fake also rejects paths that don't start with `/`.
+- Completion callbacks: pass your routes (or the handler from `hy.handler()`) as `callbacks`, and the
+  fake dispatches an event to them whenever a request finishes, before `send()` returns:
+
+  ```ts
+  const fake = createFakeHookyard({ outcome: "dead", callbacks: myRoutes });
+  await shipOrder(fake, 123);
+  expect(alertOps).toHaveBeenCalled();
+  ```
+
+  `fake.callbacks` lists every event sent, `fake.callbackEvent(id)` builds one, and
+  `await fake.signedCallback(id, { secret })` returns a signed `Request` to test your real endpoint
+  (for example `await app.request(...)` or `hooks.fetch(...)`) end to end.
 - The management API works too: `requests.list/get/attempts/replay/cancel`, `dlq.summary/replay`,
   `upstreams` and basic `stats`.
 

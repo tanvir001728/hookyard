@@ -3,6 +3,7 @@
 import { toWireDuration, toWireTimestamp } from "./duration.js";
 import type { components } from "./generated/openapi.js";
 import type {
+  CallbackDelivery,
   Attempt,
   DeliveryError,
   DlqReplayFilter,
@@ -73,6 +74,26 @@ export function fromWireRequest(r: WireRequest): HookyardRequest {
     createdAt: date(r.created_at),
     updatedAt: date(r.updated_at),
     completedAt: optionalDate(r.completed_at),
+    callbackUrl: r.callback_url ?? null,
+    onResult: r.on_result ?? null,
+  };
+}
+
+export function fromWireCallback(c: Schemas["Callback"]): CallbackDelivery {
+  return {
+    id: c.id,
+    requestId: c.request_id,
+    type: c.type,
+    url: c.url,
+    requestStatus: c.request_status,
+    status: c.status,
+    attemptCount: c.attempt_count,
+    nextAttemptAt: optionalDate(c.next_attempt_at),
+    lastStatusCode: c.last_status_code ?? null,
+    lastError: c.last_error ?? null,
+    lastAttemptAt: optionalDate(c.last_attempt_at),
+    createdAt: date(c.created_at),
+    deliveredAt: optionalDate(c.delivered_at),
   };
 }
 
@@ -202,6 +223,8 @@ export function toWireCreateRequest(input: SendInput, dedupeKey: string | undefi
   if (input.timeout !== undefined) out.timeout = toWireDuration(input.timeout, "timeout");
   if (input.retry !== undefined) out.retry = toWireRetry(input.retry);
   if (input.tags !== undefined) out.tags = { ...input.tags };
+  if (input.callbackUrl !== undefined) out.callback_url = input.callbackUrl;
+  if (input.onResult !== undefined) out.on_result = input.onResult;
   return out;
 }
 

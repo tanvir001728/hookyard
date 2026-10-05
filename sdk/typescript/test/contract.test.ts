@@ -13,7 +13,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { AuthError, Hookyard, NotFoundError, UnknownUpstreamError, ValidationError } from "../src/index.js";
-import type { UpstreamStats } from "../src/index.js";
+import type { CallbackEvent, UpstreamStats } from "../src/index.js";
 
 const url = process.env["HOOKYARD_URL"];
 const token = process.env["HOOKYARD_TOKEN"];
@@ -204,5 +204,44 @@ describe.skipIf(!live)("contract: live Hookyard server", () => {
     expect(series).toMatchObject({ upstream: "flaky", step: "5m" });
     expect(series.data.length).toBeGreaterThan(0);
     expect(series.data[0]?.start).toBeInstanceOf(Date);
+  });
+});
+
+// Callbacks need the server's signing secret too: HOOKYARD_CALLBACK_SECRET, matching one of the
+// server's HOOKYARD_CALLBACK_SECRETS.
+const callbackSecret = process.env["HOOKYARD_CALLBACK_SECRET"];
+if (live && !callbackSecret && process.env["HOOKYARD_CONTRACT_REQUIRED"]) {
+  throw new Error("Contract tests are required but HOOKYARD_CALLBACK_SECRET is not set.");
+}
+
+describe.skipIf(!live || !callbackSecret)("contract: completion callbacks", () => {
+  it("delivers a signed callback that hy.handler() verifies and routes", async () => {
+    const { createServer } = await import("node:http");
+    const hy = new Hookyard();
+    const received: CallbackEvent[] = [];
+    const hooks = hy.handler({ [`${run}.order`]: { succeeded: (e) => void received.push(e) } });
+    const server = createServer((req, res) => void hooks.node(req, res));
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const { port } = server.address() as { port: number };
+      const job = await hy.to("flaky").post("/orders", { orderId: 9 }, {
+        callbackUrl: `http://127.0.0.1:${port}/hooks/hookyard`,
+        onResult: `${run}.order`,
+        tags: { run },
+      });
+      for (let i = 0; i < 200 && received.length === 0; i++) await new Promise((r) => setTimeout(r, 100));
+
+      expect(received).toHaveLength(1);
+      expect(received[0]).toMatchObject({
+        type: "request.succeeded",
+        data: { requestId: job.id, upstream: "flaky", status: "succeeded", onResult: `${run}.order`, tags: { run } },
+      });
+      expect(received[0]?.data.response?.statusCode).toBe(200);
+
+      const [delivery] = await hy.requests.callbacks(job.id);
+      expect(delivery).toMatchObject({ id: received[0]?.id, status: "delivered", lastStatusCode: 204, attemptCount: 1 });
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
   });
 });

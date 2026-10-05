@@ -271,8 +271,11 @@ jobs:
                 initial_interval: 100ms
           EOF
           ./bin/flakyvendor -addr 127.0.0.1:9090 > "$RUNNER_TEMP/flakyvendor.log" 2>&1 &
-          # A throwaway signing secret, so the browser tests can see callbacks.
-          HOOKYARD_CALLBACK_SECRETS="whsec_$(openssl rand -base64 32)" ./bin/hookyard serve > "$RUNNER_TEMP/hookyard.log" 2>&1 &
+          # A throwaway signing secret, shared with the contract tests that receive callbacks.
+          secret="whsec_$(openssl rand -base64 32)"
+          echo "::add-mask::$secret"
+          echo "HOOKYARD_CALLBACK_SECRET=$secret" >> "$GITHUB_ENV"
+          HOOKYARD_CALLBACK_SECRETS="$secret" ./bin/hookyard serve > "$RUNNER_TEMP/hookyard.log" 2>&1 &
           for _ in $(seq 1 30); do
             if curl -fsS http://127.0.0.1:8080/readyz; then exit 0; fi
             sleep 1

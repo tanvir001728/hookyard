@@ -1,5 +1,19 @@
 export { Hookyard } from "./client.js";
 export type { HookyardOptions } from "./client.js";
+export { CallbackVerificationError, createCallbackHandler, signCallback, verifyCallback } from "./callbacks.js";
+export type {
+  CallbackEvent,
+  CallbackEventHandler,
+  CallbackEventType,
+  CallbackHandler,
+  CallbackHandlerOptions,
+  CallbackInput,
+  CallbackResponse,
+  CallbackRoutes,
+  CallbackSecret,
+  OutcomeHandlers,
+  VerifyCallbackOptions,
+} from "./callbacks.js";
 export { Job } from "./job.js";
 export type { ResultOptions } from "./job.js";
 export type { FetchFunction } from "./transport.js";
@@ -20,6 +34,7 @@ export { FINAL_STATUSES, isFinalStatus } from "./types.js";
 export type {
   Attempt,
   AttemptResponse,
+  CallbackDelivery,
   DeliveryError,
   DeliveryErrorCode,
   DlqApi,

@@ -39,6 +39,14 @@ describe("toSdk", () => {
     expect(code).not.toContain("app-secret");
   });
 
+  it("keeps the callback options", () => {
+    const withCallback = { ...req, callback_url: "http://app/hooks", on_result: "order.shipment" } as unknown as HookyardRequest;
+    expect(toSdk(withCallback)).toContain('"callbackUrl": "http://app/hooks"');
+    expect(toSdk(withCallback)).toContain('"onResult": "order.shipment"');
+    const json = toCurl(withCallback, "http://x").split("-d '")[1] ?? "";
+    expect(json).toContain('"callback_url":"http://app/hooks"');
+  });
+
   it("omits the body argument for GET", () => {
     expect(toSdk({ ...req, method: "GET", headers: {}, tags: {}, body: null } as unknown as HookyardRequest)).toBe(
       'await hy.to("courier-x").get("/shipments?notify=true");',

@@ -10,8 +10,9 @@ export type ApiErrorCode = components["schemas"]["ErrorCode"];
  * - `connection_error`: Hookyard could not be reached
  * - `timeout`: Hookyard did not respond in time, or a request did not finish in time
  * - `unexpected_response`: the server's response was not a valid Hookyard API response
+ * - `invalid_signature`: a received callback's signature is missing, wrong or expired
  */
-export type ClientErrorCode = "connection_error" | "timeout" | "unexpected_response";
+export type ClientErrorCode = "connection_error" | "timeout" | "unexpected_response" | "invalid_signature";
 
 export type ErrorCode = ApiErrorCode | ClientErrorCode;
 
