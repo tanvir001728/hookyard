@@ -392,6 +392,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Stream live events
+         * @description A [Server-Sent Events](https://html.spec.whatwg.org/multipage/server-sent-events.html) stream
+         *     of what happens on this Hookyard instance, as it happens: delivery attempts (`attempt`), request
+         *     state changes made through the API (`request`), and breaker transitions, pauses and resumes
+         *     (`upstream`). Each message has an `id`, an `event` type and JSON `data` (an `Event`).
+         *
+         *     Events are not stored: a client sees events while it is connected, and `Last-Event-ID` is
+         *     ignored. A client that falls more than a few hundred events behind is sent a `dropped` event and
+         *     disconnected, so a slow client never slows deliveries down; reconnect to continue. Comments
+         *     (`: ping`) are sent every 15 seconds to keep proxies from closing an idle stream.
+         */
+        get: operations["streamEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/healthz": {
         parameters: {
             query?: never;
@@ -682,6 +710,46 @@ export interface components {
             created_at: string;
             /** Format: date-time */
             delivered_at?: string | null;
+        };
+        /** @description The JSON data of a live event. */
+        Event: {
+            /** @enum {string} */
+            type: "attempt" | "request" | "upstream";
+            /** Format: date-time */
+            at: string;
+            data: components["schemas"]["AttemptEvent"] | components["schemas"]["RequestEvent"] | components["schemas"]["UpstreamEventData"];
+        };
+        AttemptEvent: {
+            request_id: components["schemas"]["RequestId"];
+            upstream: components["schemas"]["UpstreamName"];
+            method: components["schemas"]["HTTPMethod"];
+            path: string;
+            attempt: number;
+            /** @enum {string} */
+            outcome: "success" | "retryable_failure" | "permanent_failure" | "unknown";
+            status_code: number | null;
+            duration_ms: number;
+            error: components["schemas"]["DeliveryError"] | null;
+            status: components["schemas"]["RequestStatus"];
+            /** Format: date-time */
+            retry_at: string | null;
+        };
+        RequestEvent: {
+            request_id: components["schemas"]["RequestId"];
+            upstream: components["schemas"]["UpstreamName"];
+            method: components["schemas"]["HTTPMethod"];
+            path: string;
+            status: components["schemas"]["RequestStatus"];
+            /** @enum {string} */
+            action: "enqueued" | "canceled" | "resolved" | "replayed";
+            actor: string;
+        };
+        UpstreamEventData: {
+            upstream: components["schemas"]["UpstreamName"];
+            /** @enum {string} */
+            kind: "breaker_open" | "breaker_half_open" | "breaker_closed" | "paused" | "resumed";
+            reason: string;
+            actor: string;
         };
         CallbackList: {
             data: components["schemas"]["Callback"][];
@@ -1734,6 +1802,60 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             default: components["responses"]["InternalError"];
+        };
+    };
+    streamEvents: {
+        parameters: {
+            query?: {
+                /** @description Only include this upstream. */
+                upstream?: components["parameters"]["Upstream"];
+                /**
+                 * @description Only events that leave a request in one of these statuses, comma separated. Upstream events
+                 *     have no status, so they are left out when this is set.
+                 * @example [
+                 *       "failed",
+                 *       "dead",
+                 *       "unknown"
+                 *     ]
+                 */
+                status?: components["schemas"]["RequestStatus"][];
+                /** @description Only these event types, comma separated. */
+                type?: ("attempt" | "request" | "upstream")[];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The event stream. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example retry: 2000
+                     *     : connected
+                     *
+                     *     id: 42
+                     *     event: attempt
+                     *     data: {"type":"attempt","at":"2026-10-05T09:12:03Z","data":{"request_id":"req_01J9…","upstream":"courier-x","method":"POST","path":"/shipments","attempt":1,"outcome":"success","status_code":201,"duration_ms":182,"error":null,"status":"succeeded","retry_at":null}}
+                     */
+                    "text/event-stream": string;
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description Too many streams are open. Retry after the `Retry-After` header. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     healthz: {

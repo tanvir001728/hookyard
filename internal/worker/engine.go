@@ -12,6 +12,7 @@ import (
 
 	"github.com/tanvir001728/hookyard/internal/breaker"
 	"github.com/tanvir001728/hookyard/internal/config"
+	"github.com/tanvir001728/hookyard/internal/events"
 	"github.com/tanvir001728/hookyard/internal/model"
 	"github.com/tanvir001728/hookyard/internal/store"
 )
@@ -33,6 +34,8 @@ type Config struct {
 	DrainTimeout time.Duration
 	// Observer, if set, is told about every recorded attempt (for metrics).
 	Observer Observer
+	// Events, if set, receives live attempt and breaker events.
+	Events *events.Hub
 }
 
 // Observer receives each recorded attempt: the upstream, when the attempt
@@ -252,6 +255,7 @@ func (e *Engine) applyTransitions(ctx context.Context, changes ...transition) {
 		if err != nil {
 			log.Error("recording the breaker transition failed", "error", err)
 		}
+		e.cfg.Events.Publish(events.Upstream(t.upstream, "breaker_"+string(t.To), t.Reason, "", t.At))
 		if t.To != breaker.Open {
 			e.Notify()
 		}
@@ -285,6 +289,7 @@ func (e *Engine) refreshPauses(ctx context.Context) {
 	}
 	for _, u := range resumed {
 		e.log.Info("pause ended; deliveries resume", "upstream", u)
+		e.cfg.Events.Publish(events.Upstream(u, "resumed", "the pause ended", "hookyard", now))
 	}
 
 	pauses, err := e.store.ListPauses(ctx)

@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/tanvir001728/hookyard/internal/config"
+	"github.com/tanvir001728/hookyard/internal/events"
 	"github.com/tanvir001728/hookyard/internal/model"
 	"github.com/tanvir001728/hookyard/internal/retry"
 	"github.com/tanvir001728/hookyard/internal/store"
@@ -80,6 +81,7 @@ func (s *Server) handleCreateRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.notify()
+	s.v1.Events.Publish(events.Request(req, "enqueued", actorFrom(r.Context())))
 	s.log.Info("request enqueued", "id", req.ID, "upstream", req.Upstream, "status", req.Status, "actor", actorFrom(r.Context()))
 	w.Header().Set("Location", "/v1/requests/"+req.ID)
 	writeJSON(w, http.StatusAccepted, toRequestJSON(req))

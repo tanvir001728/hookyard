@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Live tail: `GET /v1/events` streams delivery attempts, request state changes and upstream
+  transitions as Server-Sent Events, filtered by upstream, status and type, and the dashboard's
+  **Live** page shows them as they happen, with filters and pause. Events aren't stored, and a client
+  that falls behind is disconnected rather than slowing deliveries down.
 - Dashboard: an "Unknown" queue (`/unknown`) of requests that were sent but got no response, with a
   count in the navigation. Mark each one as delivered or failed (with a reason), or replay it after a
   warning about duplicates. `GET /v1/requests?count=true` (and `count: true` in the SDK) returns the

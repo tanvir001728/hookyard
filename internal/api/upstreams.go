@@ -9,6 +9,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/tanvir001728/hookyard/internal/config"
+	"github.com/tanvir001728/hookyard/internal/events"
 	"github.com/tanvir001728/hookyard/internal/model"
 	"github.com/tanvir001728/hookyard/internal/store"
 )
@@ -153,6 +154,7 @@ func (s *Server) handlePauseUpstream(w http.ResponseWriter, r *http.Request) {
 	if s.v1.Monitor != nil {
 		s.v1.Monitor.UpstreamsChanged()
 	}
+	s.v1.Events.Publish(events.Upstream(u.Name, "paused", pause.Reason, actorFrom(r.Context()), time.Now()))
 	s.log.Info("upstream paused", "upstream", u.Name, "until", until, "actor", actorFrom(r.Context()))
 	writeJSON(w, http.StatusOK, s.toUpstreamJSON(u, &pause))
 }
@@ -181,6 +183,7 @@ func (s *Server) handleResumeUpstream(w http.ResponseWriter, r *http.Request) {
 	if s.v1.Monitor != nil {
 		s.v1.Monitor.UpstreamsChanged()
 	}
+	s.v1.Events.Publish(events.Upstream(u.Name, "resumed", strings.TrimSpace(in.Reason), actorFrom(r.Context()), time.Now()))
 	s.log.Info("upstream resumed", "upstream", u.Name, "actor", actorFrom(r.Context()))
 	writeJSON(w, http.StatusOK, s.toUpstreamJSON(u, nil))
 }

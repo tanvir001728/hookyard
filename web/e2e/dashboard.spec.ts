@@ -190,7 +190,7 @@ test.describe("dead letters", () => {
 test("no page scrolls sideways on a phone", async ({ page, isMobile }) => {
   test.skip(!isMobile, "phone layout only");
   await signIn(page);
-  for (const path of ["/", "/requests", "/dlq", "/unknown", "/upstreams/courier-x"]) {
+  for (const path of ["/", "/requests", "/live", "/dlq", "/unknown", "/upstreams/courier-x"]) {
     await page.goto(path);
     await page.waitForLoadState("networkidle");
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
@@ -380,5 +380,60 @@ test.describe("unknown outcomes", () => {
     // This project's pausable upstream never receives requests.
     await page.goto(`/unknown?upstream=pausable-${testInfo.project.name}`);
     await expect(page.getByText("Nothing to settle")).toBeVisible();
+  });
+});
+
+test.describe("live tail", () => {
+  const send = async (request: import("@playwright/test").APIRequestContext, upstream: string, path: string) => {
+    const res = await request.post("/v1/requests", { headers: { Authorization: `Bearer ${token}` }, data: { upstream, method: "POST", path, body: {} } });
+    expect(res.status()).toBe(202);
+  };
+  const unique = (label: string) => `/live/${label}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+  test("shows deliveries as they happen", async ({ page, request }) => {
+    await signIn(page);
+    await page.goto("/live");
+    await expect(page.getByRole("status").filter({ hasText: "Live" })).toBeVisible();
+
+    const path = unique("ship");
+    await send(request, "courier-x", path);
+    const events = page.getByRole("list", { name: "Live events" });
+    await expect(events.getByRole("listitem").filter({ hasText: path }).filter({ hasText: "Enqueued" })).toBeVisible({ timeout: 5_000 });
+    await expect(events.getByRole("listitem").filter({ hasText: path }).filter({ hasText: "Success" })).toBeVisible({ timeout: 5_000 });
+  });
+
+  test("filters by upstream and status, kept in the URL", async ({ page, request }) => {
+    await signIn(page);
+    await page.goto("/live");
+    await page.getByLabel("Upstream").selectOption("payments-y");
+    await page.getByLabel("Show").selectOption("problems");
+    await expect(page).toHaveURL(/upstream=payments-y/);
+    await expect(page).toHaveURL(/show=problems/);
+    await expect(page.getByRole("status").filter({ hasText: "Live" })).toBeVisible();
+
+    const other = unique("other");
+    const mine = unique("mine");
+    await send(request, "courier-x", other); // another upstream
+    await send(request, "payments-y", `${mine}?status=409`); // fails permanently: dead (409 stays clear of the DLQ tests' groups)
+    const events = page.getByRole("list", { name: "Live events" });
+    await expect(events.getByRole("listitem").filter({ hasText: mine }).filter({ hasText: "Permanent failure" })).toBeVisible({ timeout: 5_000 });
+    // Enqueued (pending) events don't match the problems filter, and courier-x is filtered out.
+    await expect(events.getByRole("listitem").filter({ hasText: mine }).filter({ hasText: "Enqueued" })).toHaveCount(0);
+    await expect(events.getByRole("listitem").filter({ hasText: other })).toHaveCount(0);
+  });
+
+  test("pausing keeps new events until resumed", async ({ page, request }) => {
+    await signIn(page);
+    await page.goto("/live");
+    await expect(page.getByRole("status").filter({ hasText: "Live" })).toBeVisible();
+    await page.getByRole("button", { name: "Pause" }).click();
+
+    const path = unique("held");
+    await send(request, "courier-x", path);
+    await expect(page.getByRole("button", { name: /Resume \(\d+ new\)/ })).toBeVisible({ timeout: 5_000 });
+    await expect(page.getByText(path)).toHaveCount(0);
+
+    await page.getByRole("button", { name: /Resume/ }).click();
+    await expect(page.getByRole("list", { name: "Live events" }).getByRole("listitem").filter({ hasText: path }).first()).toBeVisible();
   });
 });

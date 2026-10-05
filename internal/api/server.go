@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/tanvir001728/hookyard/internal/config"
+	"github.com/tanvir001728/hookyard/internal/events"
 	"github.com/tanvir001728/hookyard/internal/store"
 )
 
@@ -39,6 +40,9 @@ type V1 struct {
 	Notify func()
 	// Monitor, if set, provides live upstream state and is told about pauses.
 	Monitor UpstreamMonitor
+	// Events, if set, receives live request and upstream events and serves
+	// GET /v1/events.
+	Events *events.Hub
 	// CallbacksEnabled is true when callback signing secrets are configured.
 	CallbacksEnabled bool
 	// NotifyCallbacks, if set, is called after a callback may have been
@@ -121,6 +125,7 @@ func (s *Server) routes() {
 		v1("GET /v1/upstreams/{name}/events", s.handleUpstreamEvents)
 		v1("GET /v1/stats/overview", s.handleStatsOverview)
 		v1("GET /v1/stats/timeseries", s.handleStatsTimeseries)
+		v1("GET /v1/events", s.handleEvents)
 
 		// Dashboard sessions. Internal to the dashboard, not part of the
 		// public API.
