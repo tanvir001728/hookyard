@@ -235,6 +235,9 @@ export function RequestDetailPage() {
               The request was sent to {r.upstream}, but no response arrived, so it may or may not have been processed. To avoid a
               duplicate it wasn't retried. Check with {r.upstream}, then mark it as delivered or as failed.
             </p>
+            <Link to="/unknown" className="mt-2 inline-block text-primary hover:underline">
+              See every request with an unknown outcome
+            </Link>
           </div>
         </div>
       )}

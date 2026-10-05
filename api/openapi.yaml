@@ -165,6 +165,12 @@ paths:
         - $ref: "#/components/parameters/CreatedBefore"
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Cursor"
+        - name: count
+          in: query
+          description: |
+            Also return `total`, the number of requests matching the filters across all pages. Counting
+            can be slow for broad filters on a large database, so it is off by default.
+          schema: { type: boolean, default: false }
       responses:
         "200":
           description: A page of requests.
@@ -1129,6 +1135,10 @@ components:
         next_cursor:
           type: [string, "null"]
           description: Cursor for the next page, or `null` on the last page.
+        total:
+          type: integer
+          minimum: 0
+          description: Requests matching the filters across all pages. Only present with `count=true`.
 
     Callback:
       type: object

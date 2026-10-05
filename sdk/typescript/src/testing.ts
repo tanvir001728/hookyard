@@ -388,7 +388,7 @@ export function createFakeHookyard(options: FakeHookyardOptions = {}): FakeHooky
     const limit = filter.limit ?? 50;
     const data = matches.slice(offset, offset + limit).map(clone);
     const next = offset + limit < matches.length ? String(offset + limit) : null;
-    return { data, nextCursor: next };
+    return { data, nextCursor: next, ...(filter.count && { total: matches.length }) };
   };
 
   const dead = (upstream?: string) =>

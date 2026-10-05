@@ -650,6 +650,8 @@ export interface components {
             data: components["schemas"]["Request"][];
             /** @description Cursor for the next page, or `null` on the last page. */
             next_cursor: string | null;
+            /** @description Requests matching the filters across all pages. Only present with `count=true`. */
+            total?: number;
         };
         /** @description One completion event and its delivery to the application. */
         Callback: {
@@ -1190,6 +1192,11 @@ export interface operations {
                 limit?: components["parameters"]["Limit"];
                 /** @description Opaque cursor from a previous response's `next_cursor`. */
                 cursor?: components["parameters"]["Cursor"];
+                /**
+                 * @description Also return `total`, the number of requests matching the filters across all pages. Counting
+                 *     can be slow for broad filters on a large database, so it is off by default.
+                 */
+                count?: boolean;
             };
             header?: never;
             path?: never;

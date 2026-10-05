@@ -190,7 +190,7 @@ test.describe("dead letters", () => {
 test("no page scrolls sideways on a phone", async ({ page, isMobile }) => {
   test.skip(!isMobile, "phone layout only");
   await signIn(page);
-  for (const path of ["/", "/requests", "/dlq", "/upstreams/courier-x"]) {
+  for (const path of ["/", "/requests", "/dlq", "/unknown", "/upstreams/courier-x"]) {
     await page.goto(path);
     await page.waitForLoadState("networkidle");
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
@@ -310,5 +310,75 @@ test.describe("upstream page", () => {
     await signIn(page);
     await page.goto("/upstreams/nope");
     await expect(page.getByText("Upstream not found")).toBeVisible();
+  });
+});
+
+test.describe("unknown outcomes", () => {
+  /** Creates a POST that hangs past its timeout, and waits until it is unknown. */
+  async function unknownRequest(request: import("@playwright/test").APIRequestContext, label: string, timeout = "300ms") {
+    const headers = { Authorization: `Bearer ${token}` };
+    const path = `/charge/${label}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}?hang=1`;
+    const res = await request.post("/v1/requests", { headers, data: { upstream: "hanging", method: "POST", path, timeout, body: { amount: 5 } } });
+    const { id } = await res.json();
+    await expect
+      .poll(async () => (await (await request.get(`/v1/requests/${id}`, { headers })).json()).status, { timeout: 15_000 })
+      .toBe("unknown");
+    return { id: id as string, path };
+  }
+
+  test("lists unknown requests and settles them as delivered or failed", async ({ page, request }, testInfo) => {
+    const delivered = await unknownRequest(request, `ok-${testInfo.project.name}`);
+    const failed = await unknownRequest(request, `fail-${testInfo.project.name}`);
+
+    await signIn(page);
+    // The navigation shows how many need a decision.
+    if (!testInfo.project.name.includes("mobile")) {
+      await expect(page.getByRole("link", { name: /^Unknown/ }).getByLabel(/requests with an unknown outcome/)).toBeVisible();
+    }
+    await page.goto("/unknown?upstream=hanging");
+    const list = page.getByRole("list", { name: "Requests with an unknown outcome" });
+    const item = (path: string) => list.getByRole("listitem").filter({ hasText: path });
+    await expect(item(delivered.path)).toContainText("no response");
+
+    await item(delivered.path).getByRole("button", { name: "Mark as delivered" }).click();
+    const dialog = page.getByRole("dialog");
+    await dialog.getByLabel("Reason (for the audit log)").fill("Charge visible in the vendor dashboard");
+    await dialog.getByRole("button", { name: "Mark as delivered" }).click();
+    await expect(item(delivered.path)).toHaveCount(0);
+
+    await item(failed.path).getByRole("button", { name: "Mark as failed" }).click();
+    await dialog.getByLabel("Reason (for the audit log)").fill("No charge in the vendor dashboard");
+    await dialog.getByRole("button", { name: "Mark as failed" }).click();
+    await expect(item(failed.path)).toHaveCount(0);
+
+    const headers = { Authorization: `Bearer ${token}` };
+    expect((await (await request.get(`/v1/requests/${delivered.id}`, { headers })).json()).status).toBe("succeeded");
+    expect((await (await request.get(`/v1/requests/${failed.id}`, { headers })).json()).status).toBe("dead");
+  });
+
+  test("replaying warns about duplicates first", async ({ page, request }, testInfo) => {
+    // A longer timeout keeps the replayed request in flight while the list refreshes.
+    const r = await unknownRequest(request, `replay-${testInfo.project.name}`, "3s");
+    await signIn(page);
+    await page.goto("/unknown?upstream=hanging");
+    const item = page.getByRole("list", { name: "Requests with an unknown outcome" }).getByRole("listitem").filter({ hasText: r.path });
+    await item.getByRole("button", { name: "Replay" }).click();
+
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toContainText("may already have processed this request");
+    await dialog.getByRole("button", { name: "Cancel" }).click();
+    await expect(item).toHaveCount(1);
+
+    await item.getByRole("button", { name: "Replay" }).click();
+    await dialog.getByRole("button", { name: "Replay anyway" }).click();
+    await expect(dialog).toHaveCount(0);
+    await expect(item).toHaveCount(0);
+  });
+
+  test("shows an empty state when there is nothing to settle", async ({ page }, testInfo) => {
+    await signIn(page);
+    // This project's pausable upstream never receives requests.
+    await page.goto(`/unknown?upstream=pausable-${testInfo.project.name}`);
+    await expect(page.getByText("Nothing to settle")).toBeVisible();
   });
 });
