@@ -162,7 +162,9 @@ describe("parity with the real client", () => {
   };
 
   it("exposes the same top-level methods", () => {
-    expect(methods(fake).filter((m) => m !== "reset")).toEqual(methods(real));
+    // The fake adds test helpers on top of the client.
+    const helpers = ["reset", "callbackEvent", "signedCallback"];
+    expect(methods(fake).filter((m) => !helpers.includes(m))).toEqual(methods(real));
   });
 
   it.each(["requests", "dlq", "upstreams", "stats"] as const)("exposes the same %s methods", (group) => {

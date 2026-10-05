@@ -17,6 +17,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- SDK: `hy.handler()` receives completion callbacks: it verifies their Standard Webhooks signature
+  and routes each event by `onResult` (or upstream) and final status, with adapters for Express,
+  Next.js App Router, NestJS, plain Node.js and Fetch API runtimes. Also `hy.verifyCallback()`,
+  standalone `createCallbackHandler()` / `verifyCallback()` for apps that only receive callbacks,
+  the `callbackUrl` and `onResult` send options, `requests.callbacks()` / `retryCallback()`, and
+  callback support in the testing fake (`callbacks` option, `fake.signedCallback()`).
 - Signed completion callbacks: set `callback_url` (per request, or a default per upstream) and
   Hookyard POSTs an event to your app when the request succeeds, dies, becomes unknown or is
   canceled. Events are signed following Standard Webhooks with `HOOKYARD_CALLBACK_SECRETS` (rotation

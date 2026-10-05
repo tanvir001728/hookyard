@@ -7,6 +7,8 @@
  *
  * @module
  */
+import { createCallbackHandler, signCallback, verifyCallback } from "./callbacks.js";
+import type { CallbackEvent, CallbackHandler, CallbackRoutes } from "./callbacks.js";
 import { iteratePages } from "./client.js";
 import { toMilliseconds, toWireTimestamp } from "./duration.js";
 import { toWireCreateRequest } from "./mappers.js";
@@ -17,6 +19,7 @@ import { Job } from "./job.js";
 import { isFinalStatus } from "./types.js";
 import type {
   Attempt,
+  CallbackDelivery,
   DeliveryError,
   DlqGroup,
   DlqReplayFilter,
@@ -72,13 +75,35 @@ export interface FakeHookyardOptions {
    * `UnknownUpstreamError`, like a real server. When unset, every upstream is accepted.
    */
   upstreams?: readonly string[] | undefined;
+  /**
+   * Receives a completion callback for every request that finishes, as your app would: a handler
+   * from `hy.handler()` / `createCallbackHandler()`, or routes. Its events are dispatched before
+   * `send()` (or `cancel()`, `resolve()`) returns; an error thrown by a route is rethrown there.
+   */
+  callbacks?: CallbackHandler | CallbackRoutes | undefined;
+  /** The secret the fake signs callbacks with. Defaults to a random one; see `fake.callbackSecret`. */
+  callbackSecret?: string | undefined;
 }
 
 /** An in-memory {@link HookyardClient} for tests. */
 export interface FakeHookyard extends HookyardClient {
   /** Every `send()` call, in order, including ones that were deduplicated. */
   readonly sent: SentRequest[];
-  /** Forgets every sent request. */
+  /**
+   * Every completion callback the fake sent, in order: one per finished request that has a
+   * `callbackUrl` (or for every finished request when the `callbacks` option is set).
+   */
+  readonly callbacks: CallbackEvent[];
+  /** The secret the fake signs callbacks with. `fake.handler()` and `fake.verifyCallback()` use it. */
+  readonly callbackSecret: string;
+  /** The callback event for a finished request, as Hookyard would send it. */
+  callbackEvent(requestId: string): CallbackEvent;
+  /**
+   * A signed Fetch API `Request` carrying a finished request's callback, to test your callback
+   * endpoint end to end (sign it for your app's secret with `{ secret }`).
+   */
+  signedCallback(requestId: string, options?: { url?: string | undefined; secret?: string | undefined }): Promise<Request>;
+  /** Forgets every sent request and callback. */
   reset(): void;
 }
 
@@ -111,6 +136,48 @@ interface Stored {
   request: HookyardRequest;
   sent: SentRequest;
   attempts: Attempt[];
+  /** IDs of the callbacks sent for this request. */
+  callbacks: string[];
+}
+
+function isHandler(v: CallbackHandler | CallbackRoutes): v is CallbackHandler {
+  return typeof (v as CallbackHandler).dispatch === "function" && typeof (v as CallbackHandler).fetch === "function";
+}
+
+function randomSecret(): string {
+  const bytes = new Uint8Array(32);
+  globalThis.crypto.getRandomValues(bytes);
+  let bin = "";
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return `whsec_${btoa(bin)}`;
+}
+
+/** The JSON body Hookyard sends for an event. */
+function toWireEvent(e: CallbackEvent): unknown {
+  const d = e.data;
+  return {
+    type: e.type,
+    timestamp: e.timestamp.toISOString(),
+    data: {
+      request_id: d.requestId,
+      upstream: d.upstream,
+      method: d.method,
+      path: d.path,
+      status: d.status,
+      on_result: d.onResult,
+      tags: d.tags,
+      dedupe_key: d.dedupeKey,
+      attempt_count: d.attemptCount,
+      last_error: d.lastError,
+      response: d.response && {
+        status_code: d.response.statusCode,
+        headers: d.response.headers,
+        body: d.response.body,
+        body_truncated: d.response.bodyTruncated,
+      },
+      completed_at: d.completedAt?.toISOString() ?? null,
+    },
+  };
 }
 
 /**
@@ -124,6 +191,14 @@ interface Stored {
  */
 export function createFakeHookyard(options: FakeHookyardOptions = {}): FakeHookyard {
   const sent: SentRequest[] = [];
+  const emitted: CallbackEvent[] = [];
+  const callbackSecret = options.callbackSecret ?? randomSecret();
+  const receiver =
+    options.callbacks === undefined
+      ? undefined
+      : isHandler(options.callbacks)
+        ? options.callbacks
+        : createCallbackHandler(options.callbacks, { secret: callbackSecret });
   const store = new Map<string, Stored>();
   let counter = 0;
 
@@ -189,6 +264,44 @@ export function createFakeHookyard(options: FakeHookyardOptions = {}): FakeHooky
     }
   };
 
+  const eventFor = (entry: Stored, id: string): CallbackEvent => {
+    const r = entry.request;
+    if (!isFinalStatus(r.status)) {
+      throw invalidState("send a callback for", r.status, "succeeded, dead, unknown, canceled");
+    }
+    const last = entry.attempts[entry.attempts.length - 1];
+    const response = last?.response && last.statusCode !== null ? { statusCode: last.statusCode, ...last.response } : null;
+    return {
+      id,
+      type: `request.${r.status}`,
+      timestamp: r.completedAt ?? r.updatedAt,
+      data: {
+        requestId: r.id,
+        upstream: r.upstream,
+        method: r.method,
+        path: r.path,
+        status: r.status,
+        onResult: r.onResult,
+        tags: { ...r.tags },
+        dedupeKey: r.dedupeKey,
+        attemptCount: r.attemptCount,
+        lastError: r.lastError && { ...r.lastError },
+        response,
+        completedAt: r.completedAt,
+      },
+    };
+  };
+
+  /** Sends the callback of a request that just finished, like the server's dispatcher. */
+  const emit = async (entry: Stored): Promise<void> => {
+    if (!isFinalStatus(entry.request.status)) return;
+    if (entry.request.callbackUrl === null && receiver === undefined) return;
+    const event = eventFor(entry, `evt_fake${String(emitted.length + 1).padStart(8, "0")}`);
+    emitted.push(event);
+    entry.callbacks.push(event.id);
+    if (receiver) await receiver.dispatch(event);
+  };
+
   const send = async (input: SendInput): Promise<Job> => {
     const recorded = compact(input);
     sent.push(recorded);
@@ -243,11 +356,14 @@ export function createFakeHookyard(options: FakeHookyardOptions = {}): FakeHooky
       createdAt: now,
       updatedAt: now,
       completedAt: null,
+      callbackUrl: input.callbackUrl || null,
+      onResult: input.onResult ?? null,
     };
     const enqueued = clone(request);
-    const entry: Stored = { request, sent: recorded, attempts: [] };
+    const entry: Stored = { request, sent: recorded, attempts: [], callbacks: [] };
     store.set(request.id, entry);
     deliver(entry);
+    await emit(entry);
     return new Job(enqueued, false, load);
   };
 
@@ -319,8 +435,32 @@ export function createFakeHookyard(options: FakeHookyardOptions = {}): FakeHooky
 
   const fake: FakeHookyard = {
     sent,
+    callbacks: emitted,
+    callbackSecret,
+    callbackEvent(requestId) {
+      const entry = find(requestId);
+      return eventFor(entry, entry.callbacks[entry.callbacks.length - 1] ?? `evt_fake_${requestId}`);
+    },
+    async signedCallback(requestId, opts = {}) {
+      const event = fake.callbackEvent(requestId);
+      const body = JSON.stringify(toWireEvent(event));
+      const now = new Date();
+      return new Request(opts.url ?? "http://localhost/hooks/hookyard", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "webhook-id": event.id,
+          "webhook-timestamp": String(Math.floor(now.getTime() / 1000)),
+          "webhook-signature": await signCallback(opts.secret ?? callbackSecret, event.id, now, body),
+        },
+        body,
+      });
+    },
+    verifyCallback: (input, opts = {}) => verifyCallback(input, { ...opts, secret: callbackSecret }),
+    handler: (routes, opts = {}) => createCallbackHandler(routes, { ...opts, secret: callbackSecret }),
     reset() {
       sent.length = 0;
+      emitted.length = 0;
       store.clear();
       pauses.clear();
       events.clear();
@@ -344,6 +484,7 @@ export function createFakeHookyard(options: FakeHookyardOptions = {}): FakeHooky
         Object.assign(entry.request, { status: "pending", completedAt: null, updatedAt: new Date() });
         const snapshot = clone(entry.request);
         deliver(entry);
+        await emit(entry);
         return snapshot;
       },
       async resolve(id, outcome) {
@@ -358,6 +499,7 @@ export function createFakeHookyard(options: FakeHookyardOptions = {}): FakeHooky
           nextAttemptAt: null,
           lastError: outcome === "succeeded" ? null : entry.request.lastError,
         });
+        await emit(entry);
         return clone(entry.request);
       },
       async cancel(id) {
@@ -374,7 +516,39 @@ export function createFakeHookyard(options: FakeHookyardOptions = {}): FakeHooky
           nextAttemptAt: null,
           lastError: { code: "canceled", message: "the request was canceled" },
         });
+        await emit(entry);
         return clone(entry.request);
+      },
+      async callbacks(id) {
+        const entry = find(id);
+        return entry.callbacks.map((eventId): CallbackDelivery => {
+          const event = emitted.find((e) => e.id === eventId) as CallbackEvent;
+          return {
+            id: eventId,
+            requestId: id,
+            type: event.type,
+            url: entry.request.callbackUrl ?? "",
+            requestStatus: event.data.status,
+            status: "delivered",
+            attemptCount: 1,
+            nextAttemptAt: null,
+            lastStatusCode: 204,
+            lastError: null,
+            lastAttemptAt: event.timestamp,
+            createdAt: event.timestamp,
+            deliveredAt: event.timestamp,
+          };
+        });
+      },
+      async retryCallback(id, callbackId) {
+        const entry = find(id);
+        if (!entry.callbacks.includes(callbackId)) {
+          throw new NotFoundError(`Not found: callback "${callbackId}" of request "${id}" not found`, { status: 404, code: "not_found" });
+        }
+        throw new InvalidStateError("Invalid state: cannot retry a callback that is delivered (allowed: failed)", {
+          status: 409,
+          code: "invalid_state",
+        });
       },
     },
     dlq: {

@@ -1,3 +1,4 @@
+import type { CallbackEvent, CallbackHandler, CallbackHandlerOptions, CallbackInput, CallbackRoutes } from "./callbacks.js";
 import type { Job } from "./job.js";
 
 /**
@@ -113,6 +114,13 @@ export interface SendOptions {
   headers?: HeaderMap | undefined;
   /** Labels for filtering and grouping, for example the calling app or tenant. */
   tags?: Tags | undefined;
+  /**
+   * Where Hookyard POSTs a signed event when the request finishes. Overrides the upstream's
+   * `callback_url`; `""` turns callbacks off for this request. Handle it with `hy.handler()`.
+   */
+  callbackUrl?: string | undefined;
+  /** A routing key carried in the callback event, matched by the routes of `hy.handler()`. */
+  onResult?: string | undefined;
 }
 
 /** Input of {@link HookyardClient.send}. */
@@ -174,6 +182,30 @@ export interface HookyardRequest {
   updatedAt: Date;
   /** When the request reached a final state. */
   completedAt: Date | null;
+  /** Where the completion callback goes, or `null` for none. */
+  callbackUrl: string | null;
+  /** The routing key carried in the callback event. */
+  onResult: string | null;
+}
+
+/** A completion callback of a request and its delivery to your app. */
+export interface CallbackDelivery {
+  /** The event ID, sent as `webhook-id`. */
+  id: string;
+  requestId: string;
+  type: "request.succeeded" | "request.dead" | "request.unknown" | "request.canceled";
+  url: string;
+  /** The request's status when it finished. */
+  requestStatus: RequestStatus;
+  /** `failed` once every attempt failed; send it again with `requests.retryCallback()`. */
+  status: "pending" | "delivering" | "delivered" | "failed";
+  attemptCount: number;
+  nextAttemptAt: Date | null;
+  lastStatusCode: number | null;
+  lastError: string | null;
+  lastAttemptAt: Date | null;
+  createdAt: Date;
+  deliveredAt: Date | null;
 }
 
 /** The response an upstream returned for an attempt. */
@@ -440,6 +472,10 @@ export interface RequestsApi {
    * with the upstream: `succeeded`, or `dead` to move it to the dead-letter queue.
    */
   resolve(id: string, outcome: "succeeded" | "dead", options?: { reason?: string | undefined }): Promise<HookyardRequest>;
+  /** The completion callbacks of a request, oldest first. */
+  callbacks(id: string): Promise<CallbackDelivery[]>;
+  /** Sends a failed callback again, with a fresh attempt budget and the same event. */
+  retryCallback(id: string, callbackId: string): Promise<CallbackDelivery>;
 }
 
 export interface DlqApi {
@@ -476,6 +512,13 @@ export interface StatsApi {
  * in-memory fake from `@hookyard/sdk/testing`, so application code can depend on this type.
  */
 export interface HookyardClient {
+  /**
+   * Verifies a completion callback's signature and returns its event. Throws a
+   * `CallbackVerificationError` if it isn't a genuine, recent callback from Hookyard.
+   */
+  verifyCallback(input: CallbackInput, options?: { tolerance?: Duration | undefined }): Promise<CallbackEvent>;
+  /** Creates an endpoint for completion callbacks that verifies and routes them. */
+  handler(routes: CallbackRoutes, options?: Omit<CallbackHandlerOptions, "secret">): CallbackHandler;
   /** Returns a client that sends requests to `upstream`. */
   to(upstream: string): UpstreamClient;
   /** Enqueues a request. The low-level equivalent of `to(upstream).post(...)` and friends. */
