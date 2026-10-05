@@ -19,6 +19,7 @@ import (
 	"github.com/tanvir001728/hookyard/internal/api"
 	"github.com/tanvir001728/hookyard/internal/callback"
 	"github.com/tanvir001728/hookyard/internal/config"
+	"github.com/tanvir001728/hookyard/internal/events"
 	"github.com/tanvir001728/hookyard/internal/logging"
 	"github.com/tanvir001728/hookyard/internal/model"
 	"github.com/tanvir001728/hookyard/internal/retention"
@@ -166,6 +167,8 @@ func serve(ctx context.Context, args []string, stderr io.Writer) error {
 	}
 
 	collector := stats.NewCollector(log, db)
+	// Live events for the dashboard's live tail; per instance, never stored.
+	hub := events.NewHub(0, 0)
 	var dispatcher *callback.Dispatcher
 	notifyCallbacks := func() {}
 	if len(cfg.CallbackSecrets) > 0 {
@@ -182,6 +185,7 @@ func serve(ctx context.Context, args []string, stderr io.Writer) error {
 		PollInterval: cfg.PollInterval,
 		LeaseMargin:  cfg.LeaseMargin,
 		DrainTimeout: cfg.ShutdownTimeout,
+		Events:       hub,
 		Observer: func(upstream string, at time.Time, d time.Duration, outcome model.AttemptOutcome, status model.Status) {
 			collector.Observe(upstream, at, d, outcome, status)
 			if status.Final() {
@@ -214,7 +218,7 @@ func serve(ctx context.Context, args []string, stderr io.Writer) error {
 		api.WithReadinessCheck("database", db.Ping),
 		api.WithV1(api.V1{
 			Store: db, Config: file, Tokens: cfg.APITokens, MaxBody: cfg.MaxBodyBytes, Notify: engine.Notify, Monitor: engine,
-			CallbacksEnabled: dispatcher != nil, NotifyCallbacks: notifyCallbacks,
+			CallbacksEnabled: dispatcher != nil, NotifyCallbacks: notifyCallbacks, Events: hub,
 		}),
 	}
 	if cfg.Metrics {
@@ -249,6 +253,8 @@ func serve(ctx context.Context, args []string, stderr io.Writer) error {
 	}
 
 	log.Info("shutting down", "timeout", cfg.ShutdownTimeout)
+	// End live event streams, which would otherwise hold the HTTP server open.
+	hub.Close()
 	shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cfg.ShutdownTimeout)
 	defer cancel()
 	// The engine drains in-flight deliveries (bounded by the same timeout)

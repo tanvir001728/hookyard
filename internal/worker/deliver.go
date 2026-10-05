@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/tanvir001728/hookyard/internal/config"
+	"github.com/tanvir001728/hookyard/internal/events"
 	"github.com/tanvir001728/hookyard/internal/model"
 	"github.com/tanvir001728/hookyard/internal/retry"
 	"github.com/tanvir001728/hookyard/internal/store"
@@ -122,6 +123,7 @@ func (e *Engine) deliver(ctx context.Context, c store.Claim) {
 	if e.cfg.Observer != nil {
 		e.cfg.Observer(req.Upstream, finished, attempt.Duration, d.Outcome, d.Status)
 	}
+	e.cfg.Events.Publish(events.Attempt(req, attempt, d.Status, finished))
 
 	// Tell the upstream's circuit breaker how it's doing. Permanent failures
 	// (such as 400 for a bad request) say nothing about its health.

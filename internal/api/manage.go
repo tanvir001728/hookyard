@@ -12,6 +12,7 @@ import (
 
 	"github.com/tanvir001728/hookyard/internal/classify"
 	"github.com/tanvir001728/hookyard/internal/config"
+	"github.com/tanvir001728/hookyard/internal/events"
 	"github.com/tanvir001728/hookyard/internal/model"
 	"github.com/tanvir001728/hookyard/internal/store"
 )
@@ -131,6 +132,7 @@ func (s *Server) handleReplayRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.notify()
+	s.v1.Events.Publish(events.Request(req, "replayed", actorFrom(r.Context())))
 	s.log.Info("request replayed", "id", id, "actor", actorFrom(r.Context()))
 	writeJSON(w, http.StatusAccepted, toRequestJSON(req))
 }
@@ -145,6 +147,7 @@ func (s *Server) handleCancelRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.notifyCallbacks()
+	s.v1.Events.Publish(events.Request(req, "canceled", actorFrom(r.Context())))
 	s.log.Info("request canceled", "id", id, "actor", actorFrom(r.Context()))
 	writeJSON(w, http.StatusOK, toRequestJSON(req))
 }
@@ -171,6 +174,7 @@ func (s *Server) handleResolveRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.notifyCallbacks()
+	s.v1.Events.Publish(events.Request(req, "resolved", actorFrom(r.Context())))
 	s.log.Info("request resolved", "id", id, "outcome", outcome, "actor", actorFrom(r.Context()))
 	writeJSON(w, http.StatusOK, toRequestJSON(req))
 }

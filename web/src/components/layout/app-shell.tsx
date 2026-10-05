@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
-import { CircleHelp, LayoutDashboard, List, LogOut, Menu, Skull, Moon, Sun, X, type LucideIcon } from "lucide-react";
+import { CircleHelp, LayoutDashboard, List, LogOut, Menu, Radio, Skull, Moon, Sun, X, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useDLQSummary } from "@/lib/dlq";
 import { useSession, useSignOut } from "@/lib/session";
@@ -21,6 +21,7 @@ interface NavItem {
 export const navItems: NavItem[] = [
   { to: "/", label: "Overview", icon: LayoutDashboard, exact: true },
   { to: "/requests", label: "Requests", icon: List },
+  { to: "/live", label: "Live", icon: Radio },
   { to: "/unknown", label: "Unknown", icon: CircleHelp, count: "unknown" },
   { to: "/dlq", label: "Dead letters", icon: Skull, count: "dlq" },
 ];

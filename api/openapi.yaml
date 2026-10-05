@@ -51,6 +51,8 @@ tags:
     description: Enqueue outbound requests and inspect their delivery.
   - name: Dead-letter queue
     description: Inspect and replay requests that could not be delivered.
+  - name: Events
+    description: Live delivery events, as Server-Sent Events.
   - name: Callbacks
     description: Signed events Hookyard sends to your app when a request finishes.
   - name: Upstreams
@@ -676,6 +678,74 @@ paths:
         default:
           $ref: "#/components/responses/InternalError"
 
+  /v1/events:
+    get:
+      operationId: streamEvents
+      tags: [Events]
+      summary: Stream live events
+      description: |
+        A [Server-Sent Events](https://html.spec.whatwg.org/multipage/server-sent-events.html) stream
+        of what happens on this Hookyard instance, as it happens: delivery attempts (`attempt`), request
+        state changes made through the API (`request`), and breaker transitions, pauses and resumes
+        (`upstream`). Each message has an `id`, an `event` type and JSON `data` (an `Event`).
+
+        Events are not stored: a client sees events while it is connected, and `Last-Event-ID` is
+        ignored. A client that falls more than a few hundred events behind is sent a `dropped` event and
+        disconnected, so a slow client never slows deliveries down; reconnect to continue. Comments
+        (`: ping`) are sent every 15 seconds to keep proxies from closing an idle stream.
+      parameters:
+        - $ref: "#/components/parameters/Upstream"
+        - name: status
+          in: query
+          description: |
+            Only events that leave a request in one of these statuses, comma separated. Upstream events
+            have no status, so they are left out when this is set.
+          style: form
+          explode: false
+          schema:
+            type: array
+            items:
+              $ref: "#/components/schemas/RequestStatus"
+          example: [failed, dead, unknown]
+        - name: type
+          in: query
+          description: Only these event types, comma separated.
+          style: form
+          explode: false
+          schema:
+            type: array
+            items:
+              type: string
+              enum: [attempt, request, upstream]
+      responses:
+        "200":
+          description: The event stream.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: Server-Sent Events; each message's `data` is an `Event`.
+                contentMediaType: text/event-stream
+                contentSchema:
+                  $ref: "#/components/schemas/Event"
+              example: |
+                retry: 2000
+                : connected
+
+                id: 42
+                event: attempt
+                data: {"type":"attempt","at":"2026-10-05T09:12:03Z","data":{"request_id":"req_01J9…","upstream":"courier-x","method":"POST","path":"/shipments","attempt":1,"outcome":"success","status_code":201,"duration_ms":182,"error":null,"status":"succeeded","retry_at":null}}
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "503":
+          description: Too many streams are open. Retry after the `Retry-After` header.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
   /healthz:
     get:
       operationId: healthz
@@ -1182,6 +1252,88 @@ components:
         delivered_at:
           type: [string, "null"]
           format: date-time
+
+    Event:
+      type: object
+      description: The JSON data of a live event.
+      required: [type, at, data]
+      properties:
+        type:
+          type: string
+          enum: [attempt, request, upstream]
+        at:
+          type: string
+          format: date-time
+        data:
+          oneOf:
+            - $ref: "#/components/schemas/AttemptEvent"
+            - $ref: "#/components/schemas/RequestEvent"
+            - $ref: "#/components/schemas/UpstreamEventData"
+
+    AttemptEvent:
+      type: object
+      required: [request_id, upstream, method, path, attempt, outcome, status_code, duration_ms, error, status, retry_at]
+      properties:
+        request_id:
+          $ref: "#/components/schemas/RequestId"
+        upstream:
+          $ref: "#/components/schemas/UpstreamName"
+        method:
+          $ref: "#/components/schemas/HTTPMethod"
+        path:
+          type: string
+        attempt:
+          type: integer
+        outcome:
+          type: string
+          enum: [success, retryable_failure, permanent_failure, unknown]
+        status_code:
+          type: [integer, "null"]
+        duration_ms:
+          type: integer
+        error:
+          oneOf:
+            - $ref: "#/components/schemas/DeliveryError"
+            - type: "null"
+        status:
+          $ref: "#/components/schemas/RequestStatus"
+        retry_at:
+          type: [string, "null"]
+          format: date-time
+
+    RequestEvent:
+      type: object
+      required: [request_id, upstream, method, path, status, action, actor]
+      properties:
+        request_id:
+          $ref: "#/components/schemas/RequestId"
+        upstream:
+          $ref: "#/components/schemas/UpstreamName"
+        method:
+          $ref: "#/components/schemas/HTTPMethod"
+        path:
+          type: string
+        status:
+          $ref: "#/components/schemas/RequestStatus"
+        action:
+          type: string
+          enum: [enqueued, canceled, resolved, replayed]
+        actor:
+          type: string
+
+    UpstreamEventData:
+      type: object
+      required: [upstream, kind, reason, actor]
+      properties:
+        upstream:
+          $ref: "#/components/schemas/UpstreamName"
+        kind:
+          type: string
+          enum: [breaker_open, breaker_half_open, breaker_closed, paused, resumed]
+        reason:
+          type: string
+        actor:
+          type: string
 
     CallbackList:
       type: object

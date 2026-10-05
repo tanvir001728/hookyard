@@ -19,6 +19,7 @@ import (
 	"github.com/tanvir001728/hookyard/internal/breaker"
 	"github.com/tanvir001728/hookyard/internal/classify"
 	"github.com/tanvir001728/hookyard/internal/config"
+	"github.com/tanvir001728/hookyard/internal/events"
 	"github.com/tanvir001728/hookyard/internal/flakyvendor"
 	"github.com/tanvir001728/hookyard/internal/model"
 	"github.com/tanvir001728/hookyard/internal/store"
@@ -766,4 +767,36 @@ func freeAddr(t *testing.T) string {
 	addr := l.Addr().String()
 	_ = l.Close()
 	return addr
+}
+
+func TestAttemptsArePublishedLive(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	hub := events.NewHub(16, 0)
+	sub := hub.Subscribe(events.Filter{Types: map[string]bool{events.TypeAttempt: true}})
+	e := h.start(Config{Events: hub})
+
+	req := h.enqueue("/orders?fail_first=1&key=" + t.Name())
+	e.Notify()
+	var got []events.AttemptData
+	for len(got) < 2 {
+		select {
+		case ev := <-sub.Events():
+			if ev.At.IsZero() || ev.Upstream != "flaky" {
+				t.Errorf("event = %+v", ev)
+			}
+			if d := ev.Data.(events.AttemptData); d.RequestID == req.ID {
+				got = append(got, d)
+			}
+		// The first attempt runs at once, the retry after fastRetry's backoff.
+		case <-time.After(5 * time.Second):
+			t.Fatalf("got %d attempt events, want 2", len(got))
+		}
+	}
+	if got[0].Attempt != 1 || got[0].Status != string(model.StatusFailed) || got[0].Outcome != string(model.OutcomeRetryableFailure) || got[0].RetryAt == nil {
+		t.Errorf("first attempt = %+v", got[0])
+	}
+	if got[1].Attempt != 2 || got[1].Status != string(model.StatusSucceeded) || *got[1].StatusCode != http.StatusOK || got[1].Method != http.MethodPost {
+		t.Errorf("second attempt = %+v", got[1])
+	}
 }
