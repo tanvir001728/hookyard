@@ -6,6 +6,7 @@ import { validateRangeSearch } from "@/components/range-picker";
 import { OverviewPage } from "@/pages/overview";
 import { RequestDetailPage } from "@/pages/request-detail";
 import { RequestsPage, validateRequestsSearch } from "@/pages/requests";
+import { UnknownPage, validateUnknownSearch } from "@/pages/unknown";
 import { UpstreamDetailPage } from "@/pages/upstream-detail";
 
 const rootRoute = createRootRoute({
@@ -40,9 +41,11 @@ const upstreamDetailRoute = createRoute({
   validateSearch: validateRangeSearch,
 });
 
+const unknownRoute = createRoute({ getParentRoute: () => rootRoute, path: "/unknown", component: UnknownPage, validateSearch: validateUnknownSearch });
+
 const dlqRoute = createRoute({ getParentRoute: () => rootRoute, path: "/dlq", component: DLQPage });
 
-const routeTree = rootRoute.addChildren([overviewRoute, requestsRoute, requestDetailRoute, upstreamDetailRoute, dlqRoute]);
+const routeTree = rootRoute.addChildren([overviewRoute, requestsRoute, requestDetailRoute, upstreamDetailRoute, unknownRoute, dlqRoute]);
 
 export const router = createRouter({ routeTree, defaultPreload: "intent" });
 

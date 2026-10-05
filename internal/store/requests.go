@@ -166,6 +166,8 @@ type RequestFilter struct {
 	Limit int
 	// Cursor is a NextCursor from a previous page.
 	Cursor string
+	// Count also returns the number of matching requests across all pages.
+	Count bool
 }
 
 const (
@@ -181,10 +183,64 @@ type RequestPage struct {
 	Requests []model.Request
 	// NextCursor is empty on the last page.
 	NextCursor string
+	// Total is the number of matching requests across all pages, when
+	// RequestFilter.Count was set.
+	Total *int
 }
 
 // ListRequests returns requests matching f, newest first.
 func (s *Store) ListRequests(ctx context.Context, f RequestFilter) (RequestPage, error) {
+	where, args, err := requestFilterWhere(f)
+	if err != nil {
+		return RequestPage{}, err
+	}
+	var total *int
+	if f.Count {
+		// Counted without the cursor: the total is the same on every page.
+		n := 0
+		countWhere, countArgs, _ := requestFilterWhere(RequestFilter{
+			Upstream: f.Upstream, Statuses: f.Statuses, Tags: f.Tags, DedupeKey: f.DedupeKey,
+			CreatedAfter: f.CreatedAfter, CreatedBefore: f.CreatedBefore,
+		})
+		if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM requests`+countWhere, countArgs...).Scan(&n); err != nil {
+			return RequestPage{}, fmt.Errorf("count requests: %w", err)
+		}
+		total = &n
+	}
+
+	limit := f.Limit
+	switch {
+	case limit <= 0:
+		limit = DefaultPageSize
+	case limit > MaxPageSize:
+		limit = MaxPageSize
+	}
+
+	// Fetch one extra row to learn whether another page exists.
+	query := `SELECT ` + requestColumns + ` FROM requests` + where + fmt.Sprintf(` ORDER BY id DESC LIMIT %d`, limit+1)
+
+	rows, err := s.pool.Query(ctx, query, args...)
+	if err != nil {
+		return RequestPage{}, fmt.Errorf("list requests: %w", err)
+	}
+	reqs, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (model.Request, error) {
+		return scanRequest(row)
+	})
+	if err != nil {
+		return RequestPage{}, fmt.Errorf("list requests: %w", err)
+	}
+
+	page := RequestPage{Requests: reqs, Total: total}
+	if len(reqs) > limit {
+		page.Requests = reqs[:limit]
+		page.NextCursor = encodeCursor(reqs[limit-1].ID)
+	}
+	return page, nil
+}
+
+// requestFilterWhere builds the WHERE clause (with a leading space, or empty)
+// and its arguments for f.
+func requestFilterWhere(f RequestFilter) (string, []any, error) {
 	var (
 		where []string
 		args  []any
@@ -207,7 +263,7 @@ func (s *Store) ListRequests(ctx context.Context, f RequestFilter) (RequestPage,
 	if len(f.Tags) > 0 {
 		tags, err := marshalMap(f.Tags)
 		if err != nil {
-			return RequestPage{}, err
+			return "", nil, err
 		}
 		add("tags @> ?::jsonb", tags)
 	}
@@ -223,43 +279,14 @@ func (s *Store) ListRequests(ctx context.Context, f RequestFilter) (RequestPage,
 	if f.Cursor != "" {
 		lastID, err := decodeCursor(f.Cursor)
 		if err != nil {
-			return RequestPage{}, err
+			return "", nil, err
 		}
 		add("id < ?", lastID)
 	}
-
-	limit := f.Limit
-	switch {
-	case limit <= 0:
-		limit = DefaultPageSize
-	case limit > MaxPageSize:
-		limit = MaxPageSize
+	if len(where) == 0 {
+		return "", args, nil
 	}
-
-	query := `SELECT ` + requestColumns + ` FROM requests`
-	if len(where) > 0 {
-		query += ` WHERE ` + strings.Join(where, " AND ")
-	}
-	// Fetch one extra row to learn whether another page exists.
-	query += fmt.Sprintf(` ORDER BY id DESC LIMIT %d`, limit+1)
-
-	rows, err := s.pool.Query(ctx, query, args...)
-	if err != nil {
-		return RequestPage{}, fmt.Errorf("list requests: %w", err)
-	}
-	reqs, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (model.Request, error) {
-		return scanRequest(row)
-	})
-	if err != nil {
-		return RequestPage{}, fmt.Errorf("list requests: %w", err)
-	}
-
-	page := RequestPage{Requests: reqs}
-	if len(reqs) > limit {
-		page.Requests = reqs[:limit]
-		page.NextCursor = encodeCursor(reqs[limit-1].ID)
-	}
-	return page, nil
+	return ` WHERE ` + strings.Join(where, " AND "), args, nil
 }
 
 // ListAttempts returns every attempt of a request, oldest first. It returns

@@ -416,3 +416,19 @@ describe("requests.resolve", () => {
     expect(calls[0]?.body).toEqual({ outcome: "succeeded", reason: "vendor confirmed" });
   });
 });
+
+describe("counting requests", () => {
+  it("asks for a total and returns it", async () => {
+    const { fetch, calls } = mockFetch(json(200, { data: [], next_cursor: null, total: 7 }));
+    const page = await client(fetch).requests.list({ status: "unknown", count: true });
+    expect(calls[0]?.url.searchParams.get("count")).toBe("true");
+    expect(page.total).toBe(7);
+  });
+
+  it("leaves total out unless asked", async () => {
+    const { fetch, calls } = mockFetch(json(200, { data: [], next_cursor: null }));
+    const page = await client(fetch).requests.list({ status: "unknown" });
+    expect(calls[0]?.url.searchParams.has("count")).toBe(false);
+    expect(page).not.toHaveProperty("total");
+  });
+});

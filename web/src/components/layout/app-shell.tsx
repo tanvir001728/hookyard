@@ -1,9 +1,10 @@
 import { useState, type ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
-import { LayoutDashboard, List, LogOut, Menu, Skull, Moon, Sun, X, type LucideIcon } from "lucide-react";
+import { CircleHelp, LayoutDashboard, List, LogOut, Menu, Skull, Moon, Sun, X, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useDLQSummary } from "@/lib/dlq";
 import { useSession, useSignOut } from "@/lib/session";
+import { useUnknownCount } from "@/lib/unknown";
 import { useTheme } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 import { Logo } from "./logo";
@@ -13,15 +14,29 @@ interface NavItem {
   label: string;
   icon: LucideIcon;
   exact?: boolean;
-  /** Shows the dead-letter count next to the label. */
-  dlqCount?: boolean;
+  /** Shows a count next to the label. */
+  count?: "dlq" | "unknown";
 }
 
 export const navItems: NavItem[] = [
   { to: "/", label: "Overview", icon: LayoutDashboard, exact: true },
   { to: "/requests", label: "Requests", icon: List },
-  { to: "/dlq", label: "Dead letters", icon: Skull, dlqCount: true },
+  { to: "/unknown", label: "Unknown", icon: CircleHelp, count: "unknown" },
+  { to: "/dlq", label: "Dead letters", icon: Skull, count: "dlq" },
 ];
+
+function UnknownCount() {
+  const total = useUnknownCount().data ?? 0;
+  if (total === 0) return null;
+  return (
+    <span
+      className="ml-auto rounded-full bg-amber-500/10 px-1.5 text-xs font-medium text-amber-700 tabular-nums dark:text-amber-400"
+      aria-label={`${total} requests with an unknown outcome`}
+    >
+      {total > 999 ? "999+" : total}
+    </span>
+  );
+}
 
 function DLQCount() {
   const summary = useDLQSummary(undefined, 30_000);
@@ -38,7 +53,7 @@ function DLQCount() {
 function Nav({ onNavigate }: { onNavigate?: () => void }) {
   return (
     <nav className="flex flex-col gap-0.5" aria-label="Main">
-      {navItems.map(({ to, label, icon: Icon, exact, dlqCount }) => (
+      {navItems.map(({ to, label, icon: Icon, exact, count }) => (
         <Link
           key={to}
           to={to}
@@ -49,7 +64,8 @@ function Nav({ onNavigate }: { onNavigate?: () => void }) {
         >
           <Icon className="size-4" aria-hidden />
           {label}
-          {dlqCount && <DLQCount />}
+          {count === "dlq" && <DLQCount />}
+          {count === "unknown" && <UnknownCount />}
         </Link>
       ))}
     </nav>

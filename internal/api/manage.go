@@ -54,6 +54,13 @@ func (s *Server) handleListRequests(w http.ResponseWriter, r *http.Request) {
 	f.CreatedBefore = parseTimeParam(q, "created_before", &problems)
 	f.Limit = parseLimit(q, &problems)
 	f.Cursor = q.Get("cursor")
+	switch q.Get("count") {
+	case "", "false":
+	case "true":
+		f.Count = true
+	default:
+		problems = append(problems, "count: must be true or false")
+	}
 
 	if len(problems) > 0 {
 		writeError(w, http.StatusBadRequest, codeBadRequest, "invalid query parameters: "+strings.Join(problems, "; "))
@@ -73,7 +80,8 @@ func (s *Server) handleListRequests(w http.ResponseWriter, r *http.Request) {
 	resp := struct {
 		Data       []requestJSON `json:"data"`
 		NextCursor *string       `json:"next_cursor"`
-	}{Data: make([]requestJSON, len(page.Requests))}
+		Total      *int          `json:"total,omitempty"`
+	}{Data: make([]requestJSON, len(page.Requests)), Total: page.Total}
 	for i, req := range page.Requests {
 		resp.Data[i] = toRequestJSON(req)
 	}

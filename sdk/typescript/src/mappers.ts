@@ -98,7 +98,7 @@ export function fromWireCallback(c: Schemas["Callback"]): CallbackDelivery {
 }
 
 export function fromWireRequestList(r: Schemas["RequestList"]): RequestPage {
-  return { data: r.data.map(fromWireRequest), nextCursor: r.next_cursor ?? null };
+  return { data: r.data.map(fromWireRequest), nextCursor: r.next_cursor ?? null, ...(r.total !== undefined && { total: r.total }) };
 }
 
 export function fromWireAttempt(a: Schemas["Attempt"]): Attempt {
@@ -258,6 +258,7 @@ export function toListQuery(filter: ListRequestsFilter): URLSearchParams {
   }
   if (filter.limit !== undefined) q.set("limit", String(filter.limit));
   if (filter.cursor !== undefined) q.set("cursor", filter.cursor);
+  if (filter.count) q.set("count", "true");
   return q;
 }
 

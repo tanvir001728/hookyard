@@ -250,6 +250,8 @@ export interface ListRequestsFilter {
   limit?: number | undefined;
   /** `nextCursor` from a previous page. */
   cursor?: string | undefined;
+  /** Also count the matching requests across all pages (`page.total`). Can be slow for broad filters. */
+  count?: boolean | undefined;
 }
 
 /** One page of requests, newest first. */
@@ -257,6 +259,8 @@ export interface RequestPage {
   data: HookyardRequest[];
   /** Pass as `cursor` to get the next page; `null` on the last page. */
   nextCursor: string | null;
+  /** Requests matching the filter across all pages, when `count: true` was passed. */
+  total?: number;
 }
 
 /** Dead requests grouped by upstream and failure reason. */

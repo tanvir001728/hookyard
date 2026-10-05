@@ -100,6 +100,7 @@ func TestListRequests(t *testing.T) {
 	type page struct {
 		Data       []requestJSON `json:"data"`
 		NextCursor *string       `json:"next_cursor"`
+		Total      *int          `json:"total"`
 	}
 	var p page
 	a.do(http.MethodGet, "/v1/requests?upstream=courier-x&status=pending,failed&tag=app:orders", "", &p)
@@ -117,7 +118,17 @@ func TestListRequests(t *testing.T) {
 		t.Errorf("second page: %+v", p2)
 	}
 
-	for _, q := range []string{"limit=0", "limit=1000", "status=lost", "created_after=yesterday", "tag=nocolon", "cursor=bogus"} {
+	// The total covers every page and ignores the cursor; it's only sent when asked for.
+	if p2.Total != nil {
+		t.Errorf("total without count=true: %v", *p2.Total)
+	}
+	var counted page
+	a.do(http.MethodGet, "/v1/requests?limit=1&count=true&upstream=courier-x&cursor="+*p.NextCursor, "", &counted)
+	if counted.Total == nil || *counted.Total != 2 {
+		t.Errorf("count: %+v", counted.Total)
+	}
+
+	for _, q := range []string{"limit=0", "limit=1000", "status=lost", "created_after=yesterday", "tag=nocolon", "cursor=bogus", "count=yes"} {
 		var e apiError
 		if rec := a.do(http.MethodGet, "/v1/requests?"+q, "", &e); rec.Code != http.StatusBadRequest || e.Error.Code != codeBadRequest {
 			t.Errorf("%s: %d %+v", q, rec.Code, e)

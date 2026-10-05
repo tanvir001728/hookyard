@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Dashboard: an "Unknown" queue (`/unknown`) of requests that were sent but got no response, with a
+  count in the navigation. Mark each one as delivered or failed (with a reason), or replay it after a
+  warning about duplicates. `GET /v1/requests?count=true` (and `count: true` in the SDK) returns the
+  number of matching requests across all pages as `total`.
 - Dashboard: an upstream page (`/upstreams/{name}`, linked from the overview cards) with its live
   state, delivery and latency charts (p50/p95/p99, with table views), breaker and pause history,
   rate-limit and concurrency usage, its configuration as a list or as YAML, and pause/resume with a
