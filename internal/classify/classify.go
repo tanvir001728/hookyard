@@ -226,11 +226,7 @@ func (rs Rules) Classify(status int, body []byte) (outcome model.AttemptOutcome,
 	}
 	for i, r := range rs {
 		if r.matches(status, getDoc) {
-			label := r.Name
-			if label == "" {
-				label = fmt.Sprintf("rule %d", i+1)
-			}
-			return r.Then, label, true
+			return r.Then, r.Label(i), true
 		}
 	}
 	return "", "", false
@@ -247,4 +243,49 @@ func OutcomeFromThen(then string) (model.AttemptOutcome, error) {
 		return model.OutcomePermanentFailure, nil
 	}
 	return "", fmt.Errorf("then must be success, retry or fail, got %q", then)
+}
+
+// ThenFromOutcome is the inverse of OutcomeFromThen.
+func ThenFromOutcome(o model.AttemptOutcome) string {
+	switch o {
+	case model.OutcomeSuccess:
+		return Success
+	case model.OutcomeRetryableFailure:
+		return Retry
+	default:
+		return Fail
+	}
+}
+
+// Label is the rule's name, or "rule N" for the i-th (0-based) unnamed rule.
+func (r Rule) Label(i int) string {
+	if r.Name != "" {
+		return r.Name
+	}
+	return fmt.Sprintf("rule %d", i+1)
+}
+
+// String describes the condition as in hookyard.yaml, such as `equals "FAILED"`.
+func (c Condition) String() string {
+	val := func(v Value) string {
+		b, _ := json.Marshal(v.V)
+		return string(b)
+	}
+	switch {
+	case c.Equals != nil:
+		return "equals " + val(*c.Equals)
+	case c.NotEquals != nil:
+		return "not_equals " + val(*c.NotEquals)
+	case c.In != nil:
+		parts := make([]string, len(c.In))
+		for i, v := range c.In {
+			parts[i] = val(v)
+		}
+		return "in [" + strings.Join(parts, ", ") + "]"
+	case c.Exists != nil && *c.Exists:
+		return "exists"
+	case c.Exists != nil:
+		return "is missing"
+	}
+	return ""
 }

@@ -2,9 +2,11 @@ import { createRootRoute, createRoute, createRouter, Outlet } from "@tanstack/re
 import { AppShell } from "@/components/layout/app-shell";
 import { DLQPage } from "@/pages/dlq";
 import { NotFoundPage } from "@/pages/not-found";
-import { OverviewPage, ranges, type RangeKey } from "@/pages/overview";
+import { validateRangeSearch } from "@/components/range-picker";
+import { OverviewPage } from "@/pages/overview";
 import { RequestDetailPage } from "@/pages/request-detail";
 import { RequestsPage, validateRequestsSearch } from "@/pages/requests";
+import { UpstreamDetailPage } from "@/pages/upstream-detail";
 
 const rootRoute = createRootRoute({
   component: () => (
@@ -19,8 +21,7 @@ const overviewRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/",
   component: OverviewPage,
-  validateSearch: (search: Record<string, unknown>): { range?: RangeKey } =>
-    typeof search.range === "string" && search.range in ranges ? { range: search.range as RangeKey } : {},
+  validateSearch: validateRangeSearch,
 });
 
 const requestsRoute = createRoute({
@@ -32,9 +33,16 @@ const requestsRoute = createRoute({
 
 const requestDetailRoute = createRoute({ getParentRoute: () => rootRoute, path: "/requests/$id", component: RequestDetailPage });
 
+const upstreamDetailRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/upstreams/$name",
+  component: UpstreamDetailPage,
+  validateSearch: validateRangeSearch,
+});
+
 const dlqRoute = createRoute({ getParentRoute: () => rootRoute, path: "/dlq", component: DLQPage });
 
-const routeTree = rootRoute.addChildren([overviewRoute, requestsRoute, requestDetailRoute, dlqRoute]);
+const routeTree = rootRoute.addChildren([overviewRoute, requestsRoute, requestDetailRoute, upstreamDetailRoute, dlqRoute]);
 
 export const router = createRouter({ routeTree, defaultPreload: "intent" });
 

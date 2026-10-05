@@ -221,6 +221,10 @@ describe("upstreams", () => {
     limits: { rate_limit: "10/s", burst: 10, max_concurrency: null },
     state: { status: "active", breaker: "closed", breaker_since: null, pause: null, in_flight: 1, available_tokens: 9, throttled_until: null },
     on_timeout: "unknown",
+    dedupe_window: "1h",
+    breaker: { failure_rate: 0.5, min_calls: 20, window: "1m", consecutive_failures: 5, cooldown: "30s", probes: 3 },
+    classify: [{ name: "fake success", status: "200", body: "status", condition: 'equals "FAILED"', then: "retry" }],
+    callback_url: "http://orders/hooks",
   };
   const mapped = {
     name: "courier-x",
@@ -231,12 +235,22 @@ describe("upstreams", () => {
     limits: { rateLimit: "10/s", burst: 10, maxConcurrency: null },
     state: { status: "active", breaker: "closed", breakerSince: null, pause: null, inFlight: 1, availableTokens: 9, throttledUntil: null },
     onTimeout: "unknown",
+    dedupeWindow: "1h",
+    breaker: { failureRate: 0.5, minCalls: 20, window: "1m", consecutiveFailures: 5, cooldown: "30s", probes: 3 },
+    classify: [{ name: "fake success", status: "200", body: "status", condition: 'equals "FAILED"', then: "retry" }],
+    callbackUrl: "http://orders/hooks",
   };
 
   it("list() returns the upstreams", async () => {
     const { fetch, calls } = mockFetch(json(200, { data: [upstream] }));
     await expect(client(fetch).upstreams.list()).resolves.toEqual([mapped]);
     expect(calls[0]?.url.pathname).toBe("/v1/upstreams");
+  });
+
+  it("tolerates servers from before the configuration fields", async () => {
+    const { dedupe_window: _d, breaker: _b, classify: _c, callback_url: _u, ...old } = upstream;
+    const { fetch } = mockFetch(json(200, old));
+    await expect(client(fetch).upstreams.get("courier-x")).resolves.toMatchObject({ breaker: null, classify: [], callbackUrl: null });
   });
 
   it("get() returns one upstream", async () => {

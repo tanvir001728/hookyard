@@ -159,6 +159,20 @@ export function fromWireUpstream(u: Schemas["Upstream"]): Upstream {
       availableTokens: u.state.available_tokens ?? null,
       throttledUntil: optionalDate(u.state.throttled_until),
     },
+    // These fields arrived in v0.2; tolerate older servers.
+    dedupeWindow: u.dedupe_window ?? "",
+    breaker: u.breaker
+      ? {
+          failureRate: u.breaker.failure_rate,
+          minCalls: u.breaker.min_calls,
+          window: u.breaker.window,
+          consecutiveFailures: u.breaker.consecutive_failures,
+          cooldown: u.breaker.cooldown,
+          probes: u.breaker.probes,
+        }
+      : null,
+    classify: (u.classify ?? []).map((r) => ({ name: r.name, status: r.status ?? null, body: r.body ?? null, condition: r.condition ?? null, then: r.then })),
+    callbackUrl: u.callback_url ?? null,
     onTimeout: u.on_timeout,
   };
 }

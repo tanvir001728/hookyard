@@ -190,7 +190,7 @@ test.describe("dead letters", () => {
 test("no page scrolls sideways on a phone", async ({ page, isMobile }) => {
   test.skip(!isMobile, "phone layout only");
   await signIn(page);
-  for (const path of ["/", "/requests", "/dlq"]) {
+  for (const path of ["/", "/requests", "/dlq", "/upstreams/courier-x"]) {
     await page.goto(path);
     await page.waitForLoadState("networkidle");
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
@@ -244,4 +244,71 @@ test("the request page shows its completion callback", async ({ page, request })
   await expect(card.getByText("request.succeeded")).toBeVisible();
   await expect(card.getByText(`${vendor}/hooks/hookyard`)).toBeVisible();
   await expect(page.getByText("order.shipment", { exact: true })).toBeVisible(); // On result
+});
+
+test.describe("upstream page", () => {
+  test("opens from the overview and shows state, charts and configuration", async ({ page }) => {
+    await signIn(page);
+    const card = page.getByRole("heading", { name: "courier-x", exact: true }).locator("xpath=ancestor::div[contains(@class,'rounded-xl')][1]");
+    await card.getByRole("link", { name: "Details" }).click();
+    await expect(page).toHaveURL(/\/upstreams\/courier-x$/);
+    await expect(page.getByRole("heading", { name: "courier-x", level: 1 })).toBeVisible();
+    await expect(page.getByText("Delivering").first()).toBeVisible();
+
+    // Both charts have a legend and a table view.
+    await expect(page.getByRole("heading", { name: "Latency" })).toBeVisible();
+    const legends = page.getByRole("list", { name: "Legend" });
+    await expect(legends).toHaveCount(2);
+    await expect(legends.nth(1)).toContainText("p99");
+
+    // Configuration, including the classification rule, without header values.
+    await expect(page.getByText("50/s, burst 50")).toBeVisible();
+    await expect(page.getByText("fake success")).toBeVisible();
+    await page.getByRole("button", { name: "View as YAML" }).click();
+    await expect(page.getByText("rate_limit: 50/s")).toBeVisible();
+    await expect(page.getByText("max_concurrency: 8")).toBeVisible();
+
+    await page.getByRole("radio", { name: "6h" }).click();
+    await expect(page).toHaveURL(/range=6h/);
+    await expect(page.getByRole("heading", { name: "Last 6 hours" })).toBeVisible();
+  });
+
+  test("pauses and resumes deliveries with a reason", async ({ page }, testInfo) => {
+    const name = `pausable-${testInfo.project.name}`;
+    await signIn(page);
+    await page.goto(`/upstreams/${name}`);
+    await expect(page.getByRole("heading", { name, level: 1 })).toBeVisible();
+    // Leftover state from an interrupted run.
+    if (await page.getByRole("button", { name: "Resume" }).isVisible()) {
+      await page.getByRole("button", { name: "Resume" }).click();
+      await page.getByRole("dialog").getByLabel("Reason (for the audit log)").fill("cleanup");
+      await page.getByRole("dialog").getByRole("button", { name: "Resume deliveries" }).click();
+    }
+
+    await page.getByRole("button", { name: "Pause", exact: true }).click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog.getByRole("button", { name: "Pause deliveries" })).toBeDisabled(); // a reason is required
+    await dialog.getByLabel("Reason (for the audit log)").fill("Vendor maintenance window");
+    await dialog.getByLabel("Resume automatically").selectOption("1h");
+    await dialog.getByRole("button", { name: "Pause deliveries" }).click();
+    await expect(dialog).toHaveCount(0);
+
+    await expect(page.getByText(/Paused by dev/)).toBeVisible();
+    await expect(page.getByText(/when deliveries resume on their own/)).toBeVisible();
+    const history = page.getByRole("list", { name: "Upstream history" });
+    await expect(history.getByText("Vendor maintenance window").first()).toBeVisible();
+
+    await page.getByRole("button", { name: "Resume" }).click();
+    await dialog.getByLabel("Reason (for the audit log)").fill("Maintenance finished");
+    await dialog.getByRole("button", { name: "Resume deliveries" }).click();
+    await expect(page.getByText("Delivering").first()).toBeVisible();
+    await expect(history.getByText("Resumed").first()).toBeVisible();
+    await expect(page.getByRole("button", { name: "Pause", exact: true })).toBeVisible();
+  });
+
+  test("an unknown upstream shows a friendly message", async ({ page }) => {
+    await signIn(page);
+    await page.goto("/upstreams/nope");
+    await expect(page.getByText("Upstream not found")).toBeVisible();
+  });
 });

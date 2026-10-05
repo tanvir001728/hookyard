@@ -6,6 +6,7 @@ export type HookyardRequest = Schemas["Request"];
 export type RequestStatus = Schemas["RequestStatus"];
 export type Attempt = Schemas["Attempt"];
 export type Upstream = Schemas["Upstream"];
+export type UpstreamEvent = Schemas["UpstreamEvent"];
 export type UpstreamStats = Schemas["UpstreamStats"];
 export type StatsOverview = Schemas["StatsOverview"];
 export type StatsTimeseries = Schemas["StatsTimeseries"];

@@ -1,13 +1,18 @@
 package api
 
 import (
+	"io"
+	"log/slog"
 	"net/http"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/tanvir001728/hookyard/internal/config"
 	"github.com/tanvir001728/hookyard/internal/model"
+	"github.com/tanvir001728/hookyard/internal/store/storetest"
 )
 
 type fakeMonitor struct {
@@ -113,5 +118,63 @@ func TestPauseValidation(t *testing.T) {
 	}
 	if rec := a.do(http.MethodGet, "/v1/upstreams/courier-x/events?limit=0", "", &e); rec.Code != http.StatusBadRequest {
 		t.Errorf("bad limit: %d", rec.Code)
+	}
+}
+
+func TestUpstreamConfiguration(t *testing.T) {
+	t.Parallel()
+	file, err := config.ParseFile([]byte(`
+upstreams:
+  courier-x:
+    base_url: https://api.courier-x.example
+    dedupe_window: 2h
+    breaker: { consecutive_failures: 3 }
+    callback_url: http://orders.internal/hooks
+    classify:
+      - name: fake success
+        status: 200
+        body: status
+        equals: FAILED
+        then: retry
+      - status: 404
+        then: success
+      - body: error.code
+        in: [quota, "busy"]
+        then: fail
+  payments-y:
+    base_url: https://payments.example
+    breaker: off
+`), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &testAPI{t: t, srv: New(slog.New(slog.NewTextHandler(io.Discard, nil)), WithV1(V1{
+		Store: storetest.New(t), Config: file, Tokens: []config.APIToken{{Name: "orders", Secret: testToken}}, MaxBody: 4096,
+	}))}
+
+	var got map[string]any
+	a.do(http.MethodGet, "/v1/upstreams/courier-x", "", &got)
+	want := map[string]any{
+		"dedupe_window": "2h",
+		"callback_url":  "http://orders.internal/hooks",
+		"breaker": map[string]any{
+			"failure_rate": 0.5, "min_calls": float64(20), "window": "1m",
+			"consecutive_failures": float64(3), "cooldown": "30s", "probes": float64(3),
+		},
+		"classify": []any{
+			map[string]any{"name": "fake success", "status": "200", "body": "status", "condition": `equals "FAILED"`, "then": "retry"},
+			map[string]any{"name": "rule 2", "status": "404", "body": nil, "condition": nil, "then": "success"},
+			map[string]any{"name": "rule 3", "status": nil, "body": "error.code", "condition": `in ["quota", "busy"]`, "then": "fail"},
+		},
+	}
+	for k, v := range want {
+		if !reflect.DeepEqual(got[k], v) {
+			t.Errorf("%s = %#v, want %#v", k, got[k], v)
+		}
+	}
+
+	a.do(http.MethodGet, "/v1/upstreams/payments-y", "", &got)
+	if got["breaker"] != nil || got["callback_url"] != nil || !reflect.DeepEqual(got["classify"], []any{}) {
+		t.Errorf("payments-y: breaker %v, callback_url %v, classify %v", got["breaker"], got["callback_url"], got["classify"])
 	}
 }
