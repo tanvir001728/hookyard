@@ -69,6 +69,8 @@ export type {
   Timestamp,
   Upstream,
   UpstreamLimits,
+  UpstreamBreaker,
+  ClassificationRule,
   UpstreamState,
   UpstreamStatus,
   UpstreamPause,

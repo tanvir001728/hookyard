@@ -832,6 +832,37 @@ export interface components {
              * @enum {string}
              */
             on_timeout: "unknown" | "retry";
+            dedupe_window: components["schemas"]["Duration"];
+            /** @description Circuit breaker settings, or `null` when the breaker is off. */
+            breaker: null | {
+                /** @description Opens when this share of calls in `window` fails (with at least `min_calls`). */
+                failure_rate: number;
+                min_calls: number;
+                window: components["schemas"]["Duration"];
+                /** @description Opens after this many failures in a row. */
+                consecutive_failures: number;
+                cooldown: components["schemas"]["Duration"];
+                /** @description Requests sent while half-open to decide whether to close. */
+                probes: number;
+            };
+            /** @description Classification rules, in the order they are tried. */
+            classify: {
+                /** @description The rule's name, or `rule N`. */
+                name: string;
+                /** @example 200 */
+                status: string | null;
+                /**
+                 * @description Dot path into the JSON body.
+                 * @example status
+                 */
+                body: string | null;
+                /** @example equals "FAILED" */
+                condition: string | null;
+                /** @enum {string} */
+                then: "success" | "retry" | "fail";
+            }[];
+            /** @description The default callback URL of this upstream's requests. */
+            callback_url: string | null;
         };
         /** @description Live delivery state of the upstream on the Hookyard instance that answered. */
         UpstreamState: {

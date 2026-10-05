@@ -15,6 +15,17 @@ const sizes = {
   icon: "h-9 w-9",
 } as const;
 
+/** Button styles for other elements, such as a router `Link`. */
+export function buttonClass(variant: keyof typeof variants = "default", size: keyof typeof sizes = "md", className?: string): string {
+  return cn(
+    "inline-flex shrink-0 items-center justify-center rounded-md font-medium whitespace-nowrap transition-colors",
+    "disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-4 [&_svg]:shrink-0",
+    variants[variant],
+    sizes[size],
+    className,
+  );
+}
+
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: keyof typeof variants;
   size?: keyof typeof sizes;
@@ -28,13 +39,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
     <button
       ref={ref}
       type={type}
-      className={cn(
-        "inline-flex shrink-0 items-center justify-center rounded-md font-medium whitespace-nowrap transition-colors",
-        "disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-4 [&_svg]:shrink-0",
-        variants[variant],
-        sizes[size],
-        className,
-      )}
+      className={buttonClass(variant, size, className)}
       {...props}
     />
   );

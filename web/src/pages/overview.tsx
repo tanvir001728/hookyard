@@ -3,6 +3,8 @@ import { useQuery } from "@tanstack/react-query";
 import { getRouteApi, Link, useNavigate } from "@tanstack/react-router";
 import { Activity, AlertTriangle, CheckCircle2, CircleDashed, Inbox, Server, XCircle, type LucideIcon } from "lucide-react";
 import { PageHeader } from "@/components/layout/app-shell";
+import { Metric } from "@/components/metric";
+import { RangePicker, ranges, stepLabel } from "@/components/range-picker";
 import { Badge, type BadgeTone } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { CodeBlock } from "@/components/ui/copy-button";
@@ -10,15 +12,6 @@ import { EmptyState, ErrorState, Skeleton } from "@/components/ui/feedback";
 import { api, type StatsOverview, type StatsTimeseries, type Upstream, type UpstreamStats } from "@/lib/api";
 import { formatAge, formatCount, formatMs, formatPercent, formatRate } from "@/lib/format";
 import { healthLabel, upstreamHealth, type Health } from "@/lib/health";
-import { cn } from "@/lib/utils";
-
-export const ranges = {
-  "1h": { label: "1 hour", hours: 1, step: "1m" },
-  "6h": { label: "6 hours", hours: 6, step: "5m" },
-  "24h": { label: "24 hours", hours: 24, step: "15m" },
-  "7d": { label: "7 days", hours: 168, step: "2h" },
-} as const;
-export type RangeKey = keyof typeof ranges;
 
 const REFRESH_MS = 10_000;
 // The charting library is large; load it only when a chart is shown.
@@ -32,39 +25,6 @@ const healthStyle: Record<Health, { tone: BadgeTone; icon: LucideIcon }> = {
   failing: { tone: "danger", icon: XCircle },
 };
 
-function RangePicker({ value }: { value: RangeKey }) {
-  const navigate = useNavigate();
-  return (
-    <div role="radiogroup" aria-label="Time range" className="inline-flex rounded-lg border bg-card p-0.5 shadow-xs">
-      {(Object.keys(ranges) as RangeKey[]).map((key) => (
-        <button
-          key={key}
-          type="button"
-          role="radio"
-          aria-checked={value === key}
-          onClick={() => void navigate({ to: "/", search: { range: key }, replace: true })}
-          className={cn(
-            "rounded-md px-3 py-1 text-xs font-medium transition-colors",
-            value === key ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground",
-          )}
-        >
-          {key}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function Metric({ label, value, hint, tone }: { label: string; value: string; hint?: string; tone?: "warning" }) {
-  return (
-    <div className="min-w-0">
-      <dt className="text-xs text-muted-foreground">{label}</dt>
-      <dd className={cn("mt-0.5 truncate text-lg font-semibold tabular-nums", tone === "warning" && "text-amber-600 dark:text-amber-400")}>{value}</dd>
-      {hint && <dd className="text-xs text-muted-foreground">{hint}</dd>}
-    </div>
-  );
-}
-
 function UpstreamCard({ stats, upstream, rangeLabel }: { stats: UpstreamStats; upstream?: Upstream; rangeLabel: string }) {
   const health = upstreamHealth(stats);
   const { tone, icon: Icon } = healthStyle[health];
@@ -74,7 +34,11 @@ function UpstreamCard({ stats, upstream, rangeLabel }: { stats: UpstreamStats; u
     <Card>
       <CardHeader className="flex-row items-start justify-between gap-3">
         <div className="min-w-0">
-          <CardTitle className="truncate text-base">{stats.upstream}</CardTitle>
+          <CardTitle className="truncate text-base">
+            <Link to="/upstreams/$name" params={{ name: stats.upstream }} className="hover:underline">
+              {stats.upstream}
+            </Link>
+          </CardTitle>
           <CardDescription className="truncate font-mono text-xs">{upstream?.base_url ?? "no longer configured"}</CardDescription>
         </div>
         <Badge tone={tone}>
@@ -96,6 +60,9 @@ function UpstreamCard({ stats, upstream, rangeLabel }: { stats: UpstreamStats; u
           <Metric label="Dead letters" value={formatCount(stats.dlq_size)} hint={stats.dlq_size > 0 ? "need attention" : "none"} tone={stats.dlq_size > 0 ? "warning" : undefined} />
         </dl>
         <div className="mt-4 flex flex-wrap gap-x-4 gap-y-1 border-t pt-3 text-xs">
+          <Link to="/upstreams/$name" params={{ name: stats.upstream }} className="font-medium text-primary hover:underline">
+            Details
+          </Link>
           <Link to="/requests" search={{ upstream: stats.upstream }} className="text-primary hover:underline">
             View requests
           </Link>
@@ -137,6 +104,7 @@ await hy.to("${upstream}").post("/", { hello: "world" });`;
 }
 
 export function OverviewPage() {
+  const navigate = useNavigate();
   const range = route.useSearch().range ?? "1h";
   const r = ranges[range];
 
@@ -168,7 +136,7 @@ export function OverviewPage() {
             <Activity className="size-3.5" aria-hidden /> Delivery health for the last {r.label} · refreshes every 10s
           </span>
         }
-        actions={<RangePicker value={range} />}
+        actions={<RangePicker value={range} onChange={(key) => void navigate({ to: "/", search: { range: key }, replace: true })} />}
       />
 
       {overview.isError ? (
@@ -191,7 +159,7 @@ export function OverviewPage() {
           <Card className="mb-6">
             <CardHeader>
               <CardTitle>Deliveries</CardTitle>
-              <CardDescription>All upstreams, per {r.step === "2h" ? "2 hours" : r.step.replace("m", " minutes").replace(/^1 minutes$/, "minute")}.</CardDescription>
+              <CardDescription>All upstreams, per {stepLabel(range)}.</CardDescription>
             </CardHeader>
             <CardContent>
               {series.isError ? (

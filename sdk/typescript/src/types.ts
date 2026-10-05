@@ -317,6 +317,39 @@ export interface Upstream {
    * the app to settle) or `retry`.
    */
   onTimeout: "unknown" | "retry";
+  /** How long a `dedupeKey` is remembered. */
+  dedupeWindow: string;
+  /** Circuit breaker settings, or `null` when the breaker is off. */
+  breaker: UpstreamBreaker | null;
+  /** Classification rules, in the order they are tried. */
+  classify: ClassificationRule[];
+  /** The default callback URL of this upstream's requests. */
+  callbackUrl: string | null;
+}
+
+export interface UpstreamBreaker {
+  /** Opens when this share of calls in `window` fails (with at least `minCalls`). */
+  failureRate: number;
+  minCalls: number;
+  window: string;
+  /** Opens after this many failures in a row. */
+  consecutiveFailures: number;
+  cooldown: string;
+  /** Requests sent while half-open to decide whether to close. */
+  probes: number;
+}
+
+/** A response classification rule, as configured in `hookyard.yaml`. */
+export interface ClassificationRule {
+  /** The rule's name, or `rule N`. */
+  name: string;
+  /** Status codes it matches, such as `"200"` or `"5xx"`. */
+  status: string | null;
+  /** Dot path into the JSON body. */
+  body: string | null;
+  /** What the body value must satisfy, such as `equals "FAILED"`. */
+  condition: string | null;
+  then: "success" | "retry" | "fail";
 }
 
 /**

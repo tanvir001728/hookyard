@@ -17,6 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Dashboard: an upstream page (`/upstreams/{name}`, linked from the overview cards) with its live
+  state, delivery and latency charts (p50/p95/p99, with table views), breaker and pause history,
+  rate-limit and concurrency usage, its configuration as a list or as YAML, and pause/resume with a
+  reason. `GET /v1/upstreams` (and the SDK) now include each upstream's `dedupe_window`, breaker
+  settings, classification rules and `callback_url`.
 - SDK: `hy.handler()` receives completion callbacks: it verifies their Standard Webhooks signature
   and routes each event by `onResult` (or upstream) and final status, with adapters for Express,
   Next.js App Router, NestJS, plain Node.js and Fetch API runtimes. Also `hy.verifyCallback()`,

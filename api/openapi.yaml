@@ -1402,7 +1402,7 @@ components:
 
     Upstream:
       type: object
-      required: [name, base_url, timeout, retry, header_names, limits, state, on_timeout]
+      required: [name, base_url, timeout, retry, header_names, limits, state, on_timeout, dedupe_window, breaker, classify, callback_url]
       properties:
         name:
           $ref: "#/components/schemas/UpstreamName"
@@ -1429,6 +1429,56 @@ components:
           description: |
             What happens when a POST or PATCH was sent but no response arrived: `unknown` (wait for a
             person or the app to settle it) or `retry` (for upstreams that deduplicate).
+        dedupe_window:
+          $ref: "#/components/schemas/Duration"
+        breaker:
+          description: Circuit breaker settings, or `null` when the breaker is off.
+          oneOf:
+            - type: "null"
+            - type: object
+              required: [failure_rate, min_calls, window, consecutive_failures, cooldown, probes]
+              properties:
+                failure_rate:
+                  type: number
+                  description: Opens when this share of calls in `window` fails (with at least `min_calls`).
+                min_calls:
+                  type: integer
+                window:
+                  $ref: "#/components/schemas/Duration"
+                consecutive_failures:
+                  type: integer
+                  description: Opens after this many failures in a row.
+                cooldown:
+                  $ref: "#/components/schemas/Duration"
+                probes:
+                  type: integer
+                  description: Requests sent while half-open to decide whether to close.
+        classify:
+          type: array
+          description: Classification rules, in the order they are tried.
+          items:
+            type: object
+            required: [name, status, body, condition, then]
+            properties:
+              name:
+                type: string
+                description: The rule's name, or `rule N`.
+              status:
+                type: [string, "null"]
+                example: "200"
+              body:
+                type: [string, "null"]
+                description: Dot path into the JSON body.
+                example: status
+              condition:
+                type: [string, "null"]
+                example: equals "FAILED"
+              then:
+                type: string
+                enum: [success, retry, fail]
+        callback_url:
+          type: [string, "null"]
+          description: The default callback URL of this upstream's requests.
 
     UpstreamState:
       type: object

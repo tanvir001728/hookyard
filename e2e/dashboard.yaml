@@ -4,6 +4,15 @@ upstreams:
     base_url: http://127.0.0.1:9090
     timeout: 5s
     retry: { preset: quick, max_attempts: 3, initial_interval: 200ms }
+    # Generous limits and a rule, so the upstream page has something to show.
+    rate_limit: 50/s
+    max_concurrency: 8
+    classify:
+      - name: fake success
+        status: 200
+        body: status
+        equals: FAILED
+        then: retry
   payments-y:
     base_url: http://127.0.0.1:9090/pay
     retry: { preset: quick, max_attempts: 2, initial_interval: 200ms }
@@ -13,3 +22,9 @@ upstreams:
     base_url: http://127.0.0.1:9090
     retry: { preset: quick, max_attempts: 2, initial_interval: 200ms }
     breaker: off
+  # Paused and resumed by the upstream page tests: one per browser project,
+  # because the projects run at the same time against the same server.
+  pausable-desktop:
+    base_url: http://127.0.0.1:9090
+  pausable-mobile:
+    base_url: http://127.0.0.1:9090

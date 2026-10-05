@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tanvir001728/hookyard/internal/classify"
 	"github.com/tanvir001728/hookyard/internal/config"
 	"github.com/tanvir001728/hookyard/internal/model"
 	"github.com/tanvir001728/hookyard/internal/store"
@@ -252,6 +253,57 @@ type upstreamJSON struct {
 	Limits      limitsJSON        `json:"limits"`
 	State       upstreamStateJSON `json:"state"`
 	OnTimeout   string            `json:"on_timeout"`
+	// DedupeWindow, Breaker, Classify and CallbackURL complete the
+	// configuration shown on the dashboard's upstream page.
+	DedupeWindow model.Duration `json:"dedupe_window"`
+	Breaker      *breakerJSON   `json:"breaker"`
+	Classify     []ruleJSON     `json:"classify"`
+	CallbackURL  *string        `json:"callback_url"`
+}
+
+// breakerJSON is the circuit breaker configuration; nil when it is off.
+type breakerJSON struct {
+	FailureRate         float64        `json:"failure_rate"`
+	MinCalls            int            `json:"min_calls"`
+	Window              model.Duration `json:"window"`
+	ConsecutiveFailures int            `json:"consecutive_failures"`
+	Cooldown            model.Duration `json:"cooldown"`
+	Probes              int            `json:"probes"`
+}
+
+type ruleJSON struct {
+	Name      string  `json:"name"`
+	Status    *string `json:"status"`
+	Body      *string `json:"body"`
+	Condition *string `json:"condition"`
+	Then      string  `json:"then"`
+}
+
+func toBreakerJSON(b config.Breaker) *breakerJSON {
+	if !b.Enabled {
+		return nil
+	}
+	c := b.WithDefaults()
+	return &breakerJSON{
+		FailureRate: c.FailureRate, MinCalls: c.MinCalls, Window: model.Duration(c.Window),
+		ConsecutiveFailures: c.ConsecutiveFailures, Cooldown: model.Duration(c.Cooldown), Probes: c.Probes,
+	}
+}
+
+func toRulesJSON(rules classify.Rules) []ruleJSON {
+	out := make([]ruleJSON, len(rules))
+	for i, r := range rules {
+		out[i] = ruleJSON{Name: r.Label(i), Then: classify.ThenFromOutcome(r.Then)}
+		if r.Status != nil {
+			s := r.Status.String()
+			out[i].Status = &s
+		}
+		if len(r.Path) > 0 {
+			body, cond := strings.Join(r.Path, "."), r.Cond.String()
+			out[i].Body, out[i].Condition = &body, &cond
+		}
+	}
+	return out
 }
 
 type limitsJSON struct {
@@ -287,7 +339,19 @@ func (s *Server) toUpstreamJSON(u config.Upstream, pause *store.Pause) upstreamJ
 		Limits:      toLimitsJSON(u.Limits),
 		State:       s.upstreamState(u, pause),
 		OnTimeout:   string(u.OnTimeout),
+
+		DedupeWindow: model.Duration(u.DedupeWindow),
+		Breaker:      toBreakerJSON(u.Breaker),
+		Classify:     toRulesJSON(u.Classify),
+		CallbackURL:  nilIfEmpty(u.CallbackURL),
 	}
+}
+
+func nilIfEmpty(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
 }
 
 type attemptJSON struct {

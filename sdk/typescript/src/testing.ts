@@ -416,6 +416,10 @@ export function createFakeHookyard(options: FakeHookyardOptions = {}): FakeHooky
       headerNames: [],
       limits: { rateLimit: null, burst: null, maxConcurrency: null },
       onTimeout: "unknown",
+      dedupeWindow: "24h",
+      breaker: { failureRate: 0.5, minCalls: 20, window: "1m", consecutiveFailures: 5, cooldown: "30s", probes: 3 },
+      classify: [],
+      callbackUrl: null,
       state: {
         status: pause ? "paused" : "active",
         breaker: "closed",
